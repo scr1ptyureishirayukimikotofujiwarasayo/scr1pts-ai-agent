@@ -884,7 +884,8 @@ class Application:
         try:
             models = fetch_models(self.settings.provider, timeout=min(self.settings.timeout, 20))
         except ModelListError as exc:
-            print(red(f"models: {exc}"))
+            colour = red if exc.status == 401 else yellow
+            print(colour(f"models: {exc}"))
             catalog = sorted(catalog_models(self._catalog_data(), name))
             if catalog:
                 print(
@@ -954,7 +955,21 @@ class Application:
         try:
             models = fetch_models(self.settings.provider, timeout=min(self.settings.timeout, 20))
         except ModelListError as exc:
-            print(yellow(f"key check: {exc}"))
+            if exc.status in (403, 404, 405):
+                print(yellow(f"key check: {exc}"))
+                fallback = sorted(
+                    catalog_models(self._usage_catalog(), self.settings.provider.name)
+                )
+                if fallback:
+                    self._model_cache[self.settings.provider.name] = fallback
+                    print(
+                        dim(
+                            f"using models.dev catalogue ({len(fallback)} models)"
+                            " · /model to pick · ids are unvalidated"
+                        )
+                    )
+            else:
+                print(red(f"key check: {exc}"))
             return []
         self._model_cache[self.settings.provider.name] = models
         print(dim(f"key accepted · {len(models)} models · /model to pick"))
@@ -1377,11 +1392,19 @@ class Application:
             green(f"{name}: {env} set")
             + dim(f" · {mask(value)} · {self.settings.env_file}")
         )
-        self._refresh_active_provider()
         if name == self.settings.provider.name:
-            self._check_provider_key()
+            self._refresh_active_provider()
         else:
-            print(dim(f"/provider {name} then /model to pick from its catalogue"))
+            # Make the provider you just configured the active one, so
+            # /model lists *its* catalogue instead of the previous provider's.
+            try:
+                self._switch_provider_settings(name)
+                self._rebuild_agent()
+                print(green(f"provider -> {name}/{self.settings.model}"))
+            except ConfigError as exc:
+                print(yellow(f"key saved, but could not switch provider: {exc}"))
+        self._model_cache.pop(name, None)
+        self._check_provider_key()
 
     def _check_keys(self, target: str) -> None:
         target = target.strip().lower()

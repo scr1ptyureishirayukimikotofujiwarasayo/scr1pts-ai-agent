@@ -240,9 +240,10 @@ model -> anthropic/claude-opus-4.1
   an invalid key fails immediately with `API key rejected (HTTP 401)` instead of
   surfacing later during a chat turn. Results are cached per provider for the
   session (`/model refresh` re-fetches).
-- **Keys are checked on write too:** `/keys set <provider> <key>` now probes the
-  catalogue and reports `key accepted · N models`; `/keys check [provider|all]`
-  verifies existing keys and prints a per-provider ✓/✗ with model counts.
+- **Keys are checked on write too:** `/keys set <provider> <key>` saves the key,
+  **switches to that provider**, probes the catalogue and reports
+  `key accepted · N models`. `/keys check [provider|all]` verifies existing keys
+  and prints a per-provider ✓/✗ with model counts.
 - **`/provider <name>`** validates the new key and pre-loads its catalogue, so
   `/model` afterwards is instant.
 - **Variants:** `/model list` prints the catalogue without a picker,
@@ -250,9 +251,15 @@ model -> anthropic/claude-opus-4.1
   `/model refresh` discards the cache.
 - **No TTY** (pipes, IDE runners) prints the catalogue and accepts a number or id
   instead of using arrow keys, so `/model` still works in scripts.
-- **No `/models` endpoint** (some local gateways): you get
-  `provider exposes no /models endpoint; type a model id` and can keep using
-  `/model <id>` — nothing else breaks.
+- **No `/models` endpoint or a blocked one** (local gateways, Cloudflare/WAF):
+  you get a yellow `catalogue unavailable (HTTP 403)` warning, the list falls
+  back to models.dev ids, and `/model <id>` still works. A 403 is **not**
+  treated as an invalid key — only 401 is.
+- **Cloudflare/WAF providers** (e.g. OpenCode): requests send an explicit
+  `User-Agent: python-ai-agent/<version>`. Python's default `Python-urllib` UA
+  is rejected with `Error 1010: Access denied` (HTTP 403), which previously
+  looked like a bad key. With the explicit UA the same endpoint responds
+  normally.
 
 ## Configuration (`config.json`)
 
@@ -790,10 +797,24 @@ token — so `mcp.json` can be shared safely with `${GITHUB_TOKEN}` in it.
 
 ### GitHub MCP, checked and ready
 
-The shipped `mcp.json` starts the official GitHub MCP server and exposes its 26
-tools as `mcp__github__*` (`search_repositories`, `get_file_contents`,
-`create_pull_request`, `list_issues`, `push_files`, ...). It was verified end to
+Add this block to `mcp.json` (a cleaned/shared checkout ships with
+`"mcpServers": {}`) to start the official GitHub MCP server. It exposes 26 tools
+as `mcp__github__*` (`search_repositories`, `get_file_contents`,
+`create_pull_request`, `list_issues`, `push_files`, ...) and was verified end to
 end against `github-mcp-server 0.6.2`.
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"},
+      "timeout": 60
+    }
+  }
+}
+```
 
 ```bat
 :: one-time: give it a token (same var the models.dev/github provider uses)
@@ -1087,6 +1108,9 @@ Suggested repository settings: description + topics (`ai-agent`, `llm`,
 - `Configuration error: ...` at launch → something other than a missing key
   (unknown provider, invalid `mode`/`shell`, broken JSON). Fix `config.json`.
 - `HTTP 401` → key wrong for that provider (OpenRouter keys don't work on Groq).
+- `HTTP 403` on `/models` → provider/WAF refused the model list; the key is not
+  necessarily invalid. The harness sends a real User-Agent and falls back to the
+  models.dev catalogue; try `/model list` again or `/model <id>`.
 - `HTTP 404 model not found` → model id must match the provider's catalogue
   (e.g. `anthropic/claude-sonnet-4.5` on OpenRouter vs `claude-sonnet-4-5` on
   Anthropic/OpenCode).

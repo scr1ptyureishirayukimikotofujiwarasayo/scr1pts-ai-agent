@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .config import ROOT
+from .util import VERSION
 
 CATALOG_URL = "https://models.dev/api.json"
 DEFAULT_TTL = 24 * 3600
@@ -225,7 +226,7 @@ def _price(value: Any) -> str:
 def _download(url: str, timeout: float) -> dict[str, Any]:
     request = urllib.request.Request(
         url,
-        headers={"accept": "application/json", "user-agent": "python-ai-agent"},
+        headers={"accept": "application/json", "user-agent": f"python-ai-agent/{VERSION}"},
     )
     with urllib.request.urlopen(request, timeout=max(1.0, timeout)) as response:
         raw = response.read()

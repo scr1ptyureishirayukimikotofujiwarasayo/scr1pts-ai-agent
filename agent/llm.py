@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .config import Settings
+from .util import VERSION
 
 DeltaFn = Callable[[str], None]
 
@@ -214,7 +215,13 @@ class Client:
 
 def build_headers(provider: Any, accept: str = "application/json") -> dict[str, str]:
     """Auth + provider headers used for every request (chat and /models)."""
-    headers = {"Content-Type": "application/json", "Accept": accept}
+    headers = {
+        "Content-Type": "application/json",
+        "Accept": accept,
+        # Some providers (OpenCode via Cloudflare) block Python's default UA
+        # with "Error 1010: Access denied", so identify ourselves explicitly.
+        "User-Agent": f"python-ai-agent/{VERSION}",
+    }
     if provider.api_key:
         headers["Authorization"] = f"Bearer {provider.api_key}"
         if provider.name == "anthropic":

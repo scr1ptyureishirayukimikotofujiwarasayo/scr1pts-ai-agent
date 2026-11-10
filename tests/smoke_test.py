@@ -117,6 +117,15 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):  # noqa: N802
+        STATE["last_ua"] = self.headers.get("user-agent") or ""
+        if self.path.rstrip("/").endswith("/forbidden/models"):
+            body = json.dumps({"error": {"message": "cloudflare"}}).encode()
+            self.send_response(403)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path == "/api.json":
             self._send(json.dumps(TEST_CATALOG).encode(), "application/json")
             return
@@ -234,6 +243,12 @@ def main() -> None:
                         "base_url_env": "SMOKE_BASE_URL",
                         "api_key_env": ["SMOKE_API_KEY"],
                         "default_model": "fake-model",
+                    },
+                    "smoke-alt": {
+                        "base_url": "http://127.0.0.1:1/v1",
+                        "base_url_env": "SMOKE_BASE_URL",
+                        "api_key_env": ["SMOKE_ALT_KEY"],
+                        "default_model": "alt-model",
                     }
                 },
             }
@@ -496,6 +511,18 @@ def main() -> None:
         check_keys_out,
     )
 
+    os.environ.pop("SMOKE_ALT_KEY", None)
+    switch_out = quiet(app.cmd_keys, "set smoke-alt test-key")
+    check(
+        "setting a key switches to that provider",
+        app.settings.provider.name == "smoke-alt"
+        and "provider -> smoke-alt/alt-model" in switch_out
+        and "key accepted · 3 models" in switch_out,
+        switch_out,
+    )
+    quiet(app.cmd_provider, "smoke")
+    check("provider restored", app.settings.provider.name == "smoke")
+
     # -- MCP ----------------------------------------------------------------
     from agent.mcp import load_mcp_config
 
@@ -567,13 +594,39 @@ def main() -> None:
         str(missing_errors),
     )
 
-    shipped = json.loads((ROOT / "mcp.json").read_text(encoding="utf-8"))["mcpServers"]
+    shipped = json.loads((ROOT / "mcp.json").read_text(encoding="utf-8"))
+    check("shipped mcp.json is valid", isinstance(shipped.get("mcpServers"), dict))
+
+    github_cfg = workdir / "mcp-github.json"
+    github_cfg.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "github": {
+                        "command": "npx",
+                        "args": ["-y", "@modelcontextprotocol/server-github"],
+                        "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"},
+                        "timeout": 60,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    saved_token = os.environ.get("GITHUB_TOKEN")
+    os.environ["GITHUB_TOKEN"] = "gh-test-token"
+    try:
+        gh_servers, gh_errors = load_mcp_config(github_cfg)
+    finally:
+        if saved_token is None:
+            os.environ.pop("GITHUB_TOKEN", None)
+        else:
+            os.environ["GITHUB_TOKEN"] = saved_token
     check(
-        "github mcp is configured",
-        shipped.get("github", {}).get("command") == "npx"
-        and shipped["github"]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] == "${GITHUB_TOKEN}"
-        and not shipped["github"].get("disabled"),
-        str(list(shipped)),
+        "github mcp config parses with ${GITHUB_TOKEN}",
+        not gh_errors
+        and gh_servers["github"].env["GITHUB_PERSONAL_ACCESS_TOKEN"] == "gh-test-token",
+        str(gh_errors),
     )
 
     bad = workdir / "bad-mcp.json"
@@ -1079,6 +1132,27 @@ def main() -> None:
     fetched = fetch_models(settings.provider)
     check("fetch models", fetched == ["fake-model", "fake-model-2", "other-model"], str(fetched))
     check("fetch models sorted", fetched == sorted(fetched))
+    check(
+        "requests identify the harness",
+        "python-ai-agent" in (STATE.get("last_ua") or ""),
+        STATE.get("last_ua"),
+    )
+
+    forbidden = Provider(
+        name="smoke",
+        base_url=settings.provider.base_url + "/forbidden",
+        model="x",
+        api_key="test-key",
+    )
+    try:
+        fetch_models(forbidden)
+        check("403 keeps the status for the UI", False)
+    except ModelListError as exc:
+        check(
+            "403 keeps the status for the UI",
+            exc.status == 403 and "catalogue unavailable" in str(exc),
+            f"{exc.status}: {exc}",
+        )
 
     unauthorized = Provider(
         name="smoke", base_url=settings.provider.base_url, model="x", api_key=""
@@ -1163,9 +1237,18 @@ def main() -> None:
     app._model_cache.clear()
     fallback_list = quiet(app.cmd_model, "list")
     check(
-        "models.dev fallback when /models fails",
+        "models.dev fallback when /models 404s",
         "catalog-only" in fallback_list,
         fallback_list,
+    )
+
+    app.settings.provider.base_url = saved_base + "/forbidden"
+    app._model_cache.clear()
+    forbidden_list = quiet(app.cmd_model, "list")
+    check(
+        "403 falls back to models.dev instead of failing",
+        "catalog-only" in forbidden_list and "catalogue unavailable" in forbidden_list,
+        forbidden_list,
     )
     app.settings.provider.base_url = saved_base
     app._model_cache.clear()

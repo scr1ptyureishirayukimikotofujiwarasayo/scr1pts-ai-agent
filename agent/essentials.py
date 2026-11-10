@@ -16,6 +16,7 @@ from typing import Any, Callable
 from .agentsmd import discover, format_text
 from .config import Settings
 from .shells import ShellError, resolve as resolve_shell
+from .util import VERSION
 from .tools import Registry
 from .util import truncate
 
@@ -396,10 +397,12 @@ def register_essentials(
         timeout: int = 30,
     ) -> str:
         data = body.encode("utf-8") if body else None
+        request_headers = {"User-Agent": f"python-ai-agent/{VERSION}"}
+        request_headers.update({str(key): str(value) for key, value in (headers or {}).items()})
         request = urllib.request.Request(
             url,
             data=data,
-            headers={str(k): str(v) for k, v in (headers or {}).items()},
+            headers=request_headers,
             method=method.upper(),
         )
         try:
