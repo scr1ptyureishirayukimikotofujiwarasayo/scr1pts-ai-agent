@@ -34,13 +34,33 @@ from .settings_spec import SETTINGS, SETTINGS_BY_KEY, coerce, display_value, hin
 from .skills import SkillLoader
 from .tools import Registry
 from .usage import context_limit, cost_for, format_cost, format_percent, format_tokens
-from .util import VERSION, bold, cyan, dim, enable_ansi, green, red, truncate, yellow
+from .util import (
+    VERSION,
+    bold,
+    cyan,
+    dim,
+    enable_ansi,
+    enable_utf8,
+    green,
+    red,
+    truncate,
+    yellow,
+)
 
 BANNER = r"""
-  ___  _  _ _  _ ___   _   ___    _  _ ___ ___ _ _ ___
- | _ \| \| | \| | __| /_\ |_ _|  /_\ / __| __| | | __|
- |  _/| .` | .` | _| / _ \ | |  |/ _ \ (_ | _||_  _| _|
- |_|  |_|\_|_|\_|___/_/ \_\___| /_/ \_\___|___| |_|___|
+██████╗ ██╗   ██╗████████╗██╗  ██╗ ██████╗ ███╗   ██╗
+██╔══██╗╚██╗ ██╔╝╚══██╔══╝██║  ██║██╔═══██╗████╗  ██║
+██████╔╝ ╚████╔╝    ██║   ███████║██║   ██║██╔██╗ ██║
+██╔═══╝   ╚██╔╝     ██║   ██╔══██║██║   ██║██║╚██╗██║
+██║        ██║      ██║   ██║  ██║╚██████╔╝██║ ╚████║
+╚═╝        ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
+
+ █████╗ ██╗     █████╗  ██████╗ ███████╗███╗   ██╗████████╗
+██╔══██╗██║    ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝
+███████║██║    ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║
+██╔══██║██║    ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║
+██║  ██║██║    ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║
+╚═╝  ╚═╝╚═╝    ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝
 """
 
 
@@ -166,6 +186,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     enable_ansi()
+    enable_utf8()
     args = parse_args(argv)
 
     if args.clean:

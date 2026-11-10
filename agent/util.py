@@ -28,6 +28,18 @@ def enable_ansi() -> None:
         _COLOUR = False
 
 
+def enable_utf8() -> None:
+    """Make redirected/Windows output safe for block characters and arrows."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
 def colour(text: str, code: str) -> str:
     if not _COLOUR or not sys.stdout.isatty():
         return text
