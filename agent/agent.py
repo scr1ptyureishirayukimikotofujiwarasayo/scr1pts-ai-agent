@@ -127,6 +127,13 @@ class Agent:
         compacted = summary_section(self.summary)
         if compacted:
             parts.append(compacted)
+        extra = [
+            text
+            for text in self.hooks.run("on_system_prompt", agent=self)
+            if isinstance(text, str) and text.strip()
+        ]
+        if extra:
+            parts.append("\n\n".join(extra))
         parts.append(
             "## Environment\n"
             f"- workspace: {Path(self.settings.workspace)}\n"
@@ -297,12 +304,16 @@ class Agent:
     ) -> Completion:
         try:
             only = self.registry.read_only_names() if self.settings.mode == "plan" else None
+            messages = self._request_messages()
+            tools = self.registry.specs(only=only)
+            self.hooks.run("on_request", messages=messages, tools=tools, agent=self)
             completion = self.client.chat(
-                self._request_messages(),
-                tools=self.registry.specs(only=only),
+                messages,
+                tools=tools,
                 on_delta=on_delta,
                 on_reasoning=on_reasoning,
             )
+            self.hooks.run("on_response", completion=completion, agent=self)
         except LLMError:
             # Drop the dangling user message so the session stays usable.
             if self.messages and self.messages[-1]["role"] == "user":
@@ -372,8 +383,13 @@ class Agent:
     ) -> None:
         arguments = dict(call.arguments)
         patched = self.hooks.first_result("on_tool_call", name=call.name, arguments=arguments)
+        veto = ""
         if isinstance(patched, dict):
             arguments = patched
+        elif patched is False:
+            veto = "Blocked by plugin (on_tool_call returned False)."
+        elif isinstance(patched, str) and patched.strip():
+            veto = f"Blocked by plugin: {patched.strip()}"
 
         if on_tool:
             on_tool(call.name, arguments)
@@ -389,6 +405,8 @@ class Agent:
 
         if blocked:
             result, is_error = blocked, True
+        elif veto:
+            result, is_error = veto, True
         elif denied:
             result, is_error = (
                 "Denied by the user. Do not retry blindly: explain what you wanted to do "
@@ -400,6 +418,11 @@ class Agent:
         else:
             result, is_error = self.registry.call(call.name, arguments)
 
+        replacement = self.hooks.first_result(
+            "on_tool_result", name=call.name, result=result, is_error=is_error
+        )
+        if isinstance(replacement, str):
+            result = replacement
         self.messages.append(
             {
                 "role": "tool",
@@ -408,6 +431,5 @@ class Agent:
                 "content": result,
             }
         )
-        self.hooks.run("on_tool_result", name=call.name, result=result, is_error=is_error)
         if on_tool_result:
             on_tool_result(call.name, result, is_error)

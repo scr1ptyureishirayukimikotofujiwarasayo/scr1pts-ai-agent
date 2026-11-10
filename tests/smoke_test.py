@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import time
@@ -236,15 +237,9 @@ def main() -> None:
 
     (workdir / "empty-mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
     (workdir / "plugins-test").mkdir(parents=True, exist_ok=True)
-    (workdir / "plugins-test" / "demo.py").write_text(
-        'NAME = "demo"\n'
-        'DESCRIPTION = "Test plugin"\n'
-        "def register(ctx):\n"
-        "    @ctx.tool('now', 'Current time.', {'type': 'object', 'properties': {}})\n"
-        "    def now():\n"
-        "        return '12:00'\n"
-        "    ctx.hook('on_turn_end', lambda text: None)\n",
-        encoding="utf-8",
+    shutil.copyfile(
+        ROOT / "tests" / "fixtures" / "plugin_demo.py",
+        workdir / "plugins-test" / "demo.py",
     )
     config = workdir / "config.json"
     config.write_text(
@@ -285,9 +280,14 @@ def main() -> None:
     skills = SkillLoader(settings.skills_dir)
     register_essentials(registry, settings, skill_reader=skills.read)
     hooks = Hooks()
-    plugins, plugin_errors = load_plugins(settings.plugins_dir, registry, hooks, settings, log=lambda _: None)
+    plugin_commands: dict = {}
+    plugins, plugin_errors = load_plugins(
+        settings.plugins_dir, registry, hooks, settings, log=lambda _: None,
+        commands=plugin_commands,
+    )
     check("plugins load", not plugin_errors and bool(plugins), str(plugin_errors))
     check("plugin tool registered", "now" in registry.tools)
+    check("plugin command registered", "hello" in plugin_commands, str(list(plugin_commands)))
 
     # -- tools --------------------------------------------------------------
     result, error = registry.call("read_file", {"path": "demo.py"})
@@ -327,6 +327,19 @@ def main() -> None:
     check("tool wrote the file", (workdir / "hello.txt").read_text() == "hi")
     check("final answer streamed", final == "done" and "".join(streamed) == "done", f"{final!r}")
     check("reasoning streamed separately", "".join(reasoned) == "let me think", repr("".join(reasoned)))
+    check(
+        "plugin prompt section is injected",
+        "PLUGIN-PROMPT" in agent.system_prompt,
+        agent.system_prompt[-200:],
+    )
+    check(
+        "plugin on_request hook mutates the request",
+        any(
+            message.get("content") == "PLUGIN-REQUEST-MARKER"
+            for message in (STATE.get("last_body") or {}).get("messages", [])
+        ),
+    )
+
     check("request count", STATE["calls"] == 2, str(STATE["calls"]))
     check(
         "tool result fed back",
@@ -347,6 +360,37 @@ def main() -> None:
         "usage tracked per model",
         agent.usage_by_model.get("smoke", {}).get(settings.model, {}).get("requests", 0) >= 1,
         str(agent.usage_by_model),
+    )
+
+    from agent.llm import ToolCall
+
+    agent.reset()
+    vetoed = ToolCall(
+        id="plugin-veto",
+        name="write_file",
+        arguments={"path": "blocked.txt", "content": "x"},
+        raw_arguments="{}",
+    )
+    agent._run_tool(vetoed, 1, None, None)
+    check(
+        "plugin can veto a tool call",
+        not (workdir / "blocked.txt").exists()
+        and "blocked by plugin" in agent.messages[-1]["content"].lower(),
+        agent.messages[-1]["content"],
+    )
+
+    rewritten = ToolCall(
+        id="plugin-rewrite",
+        name="write_file",
+        arguments={"path": "rewritten.txt", "content": "y"},
+        raw_arguments="{}",
+    )
+    agent._run_tool(rewritten, 1, None, None)
+    check(
+        "plugin can rewrite a tool result",
+        (workdir / "rewritten.txt").exists()
+        and agent.messages[-1]["content"] == "result-rewritten",
+        agent.messages[-1]["content"],
     )
 
     # -- non-streaming ------------------------------------------------------
@@ -430,6 +474,17 @@ def main() -> None:
 
     output = quiet(app.cmd_settings, "")
     check("settings listing", "temperature" in output and "show_tool_results" in output)
+
+    check("plugin command in palette", "hello" in app.command_names(""))
+    check("plugin command in compact palette", any("/hello" in line for line in app.palette_lines("/")))
+    plugin_out = quiet(app.handle_command, "/hello alice")
+    check("plugin command dispatches", "plugin-hello alice" in plugin_out, plugin_out)
+    help_out = quiet(app.cmd_help, "")
+    check("plugin command documented in /help", "hello" in help_out and "Plugins" in help_out)
+    check(
+        "plugin prompt section in Application agent",
+        "PLUGIN-PROMPT" in app.agent.system_prompt,
+    )
 
     quiet(app.cmd_settings, "temperature 0.25")
     check("set temperature", app.settings.temperature == 0.25)
@@ -1421,6 +1476,38 @@ def main() -> None:
     quiet(app.cmd_settings, "show_reasoning on")
     check("show_reasoning setting", app.settings.show_reasoning is True)
     quiet(app.cmd_settings, "show_reasoning off")
+
+    # -- plugin lifecycle hooks --------------------------------------------
+    import sys as _sys
+
+    demo_module = _sys.modules.get("agent_plugin_demo")
+    check("fixture plugin module is imported", demo_module is not None)
+    if demo_module is not None:
+        demo_module.EVENTS.clear()
+        quiet(app.cmd_clear, "")
+        quiet(app.cmd_new, "")
+        quiet(app.cmd_settings, "model fake-model")
+        quiet(app.cmd_mode, "plan")
+        quiet(app.cmd_mode, "build")
+        app.agent.messages = [
+            {"role": "user", "content": "one"},
+            {"role": "assistant", "content": "a"},
+            {"role": "user", "content": "two"},
+            {"role": "assistant", "content": "b"},
+            {"role": "user", "content": "three"},
+            {"role": "assistant", "content": "c"},
+        ]
+        quiet(app.cmd_compact, "1")
+        events = demo_module.EVENTS
+        check(
+            "lifecycle hooks fire (session/model/mode/compact)",
+            any(event.startswith("session:clear") for event in events)
+            and any(event.startswith("session:new") for event in events)
+            and any(event.startswith("model:") for event in events)
+            and any(event.startswith("mode:plan") for event in events)
+            and any(event.startswith("compact:") for event in events),
+            str(events),
+        )
 
     # -- command palette ----------------------------------------------------
     from agent.lineedit import LineEditor

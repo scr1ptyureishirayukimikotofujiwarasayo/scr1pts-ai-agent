@@ -248,9 +248,11 @@ class Application:
         self.skills = SkillLoader(settings.skills_dir)
         register_essentials(self.registry, settings, skill_reader=self.skills.read)
 
+        self.plugin_commands: dict[str, Any] = {}
         self.plugins, self.plugin_errors = load_plugins(
             settings.plugins_dir, self.registry, self.hooks, settings,
             log=lambda msg: print(dim(msg)),
+            commands=self.plugin_commands,
         )
         for error in self.plugin_errors:
             print(yellow(f"plugin error: {error}"))
@@ -288,15 +290,27 @@ class Application:
 
     # -- command palette ----------------------------------------------------
 
+    def _all_commands(self) -> list[Command]:
+        static = list(COMMANDS)
+        taken = {command.name for command in static}
+        extra = [
+            Command(item["name"], item.get("args", ""), item.get("description", ""))
+            for name, item in sorted(self.plugin_commands.items())
+            if name not in taken
+        ]
+        return static + extra
+
     def command_names(self, prefix: str = "") -> list[str]:
-        return [command.name for command in COMMANDS if command.name.startswith(prefix)]
+        return [
+            command.name for command in self._all_commands() if command.name.startswith(prefix)
+        ]
 
     def palette_lines(self, buffer: str) -> list[str]:
         """Lines shown under the prompt while the user types a `/` command."""
         if not buffer.startswith("/") or " " in buffer:
             return []
         typed = buffer[1:].lower()
-        matches = [command for command in COMMANDS if command.name.startswith(typed)]
+        matches = [command for command in self._all_commands() if command.name.startswith(typed)]
         if not matches:
             return [dim(f"  no command matches /{typed}")]
         if not typed:
@@ -562,6 +576,15 @@ class Application:
         argument = parts[1].strip() if len(parts) > 1 else ""
         name = ALIASES.get(entered, entered)
 
+        if name not in COMMAND_INDEX and name in self.plugin_commands:
+            handler = self.plugin_commands[name]["handler"]
+            try:
+                result = handler(argument)
+            except Exception as exc:  # noqa: BLE001 - plugin failures are not fatal
+                print(red(f"plugin command /{name} failed: {type(exc).__name__}: {exc}"))
+                return None
+            return "exit" if result == "exit" else None
+
         if name not in COMMAND_INDEX:
             print(yellow(f"unknown command: /{entered}"))
             lines = self.palette_lines("/")
@@ -603,6 +626,21 @@ class Application:
 
     def cmd_help(self, _argument: str) -> None:
         print(HELP)
+        extra = [
+            command
+            for command in self._all_commands()
+            if command.name in self.plugin_commands
+        ]
+        if not extra:
+            return
+        print("\n" + dim("Plugins"))
+        width = max(len(command.usage) for command in extra)
+        for command in extra:
+            owner = self.plugin_commands[command.name].get("plugin", "plugin")
+            print(
+                f"  {command.usage:<{width}}  {command.description}"
+                + dim(f"  ({owner})")
+            )
 
     def cmd_new(self, argument: str) -> None:
         if self.agent.messages:
@@ -613,6 +651,7 @@ class Application:
         if self.session_name and self.sessions.exists(self.session_name):
             print(yellow(f"note: '{self.session_name}' exists and will be overwritten on save"))
         label = self.session_name or "(unnamed, saved on exit)"
+        self.hooks.run("on_session_change", kind="new", name=self.session_name, agent=self.agent)
         print(green(f"new session: {label}"))
 
     def cmd_sessions(self, _argument: str) -> None:
@@ -672,6 +711,7 @@ class Application:
         self.agent.load_usage_state(payload.get("usage"))
         self.session_name = name
         self.session_created = str(payload.get("created") or _now())
+        self.hooks.run("on_session_change", kind="switch", name=name, agent=self.agent)
         print(
             green(f"switched to '{name}'")
             + dim(f" · {len(messages)} messages · {provider or '?'}/{model or '?'}")
@@ -726,6 +766,7 @@ class Application:
             return
         if result.error:
             print(yellow(f"summariser unavailable ({result.error}) · used a local digest"))
+        self.hooks.run("on_compact", result=result, agent=self.agent)
         print(
             green(f"compacted {result.before} -> {result.after} messages")
             + dim(f" · summary {result.summary_chars} chars · {result.method}")
@@ -749,6 +790,7 @@ class Application:
                 )
             )
             print(dim(f"workspace: {self.settings.workspace}"))
+        self.hooks.run("on_session_change", kind="clear", name=self.session_name, agent=self.agent)
         print(dim("conversation cleared · screen reset" if cleared_screen else "conversation cleared"))
 
     # -- commands: model ----------------------------------------------------
@@ -1138,6 +1180,7 @@ class Application:
             return
         self.settings.mode = value
         self.agent.system_prompt = self.agent.build_system_prompt()
+        self.hooks.run("on_mode_change", mode=value, agent=self.agent)
         if value == "plan":
             print(
                 yellow("mode -> plan")
@@ -1288,6 +1331,7 @@ class Application:
         if key == "mode":
             self.settings.mode = str(value)
             self.agent.system_prompt = self.agent.build_system_prompt()
+            self.hooks.run("on_mode_change", mode=str(value), agent=self.agent)
             return "read-only" if value == "plan" else "full access"
         if key == "system_prompt":
             self.settings.system_prompt = str(value)
@@ -1329,9 +1373,11 @@ class Application:
         self.hooks = Hooks()
         self.skills = SkillLoader(self.settings.skills_dir)
         register_essentials(self.registry, self.settings, skill_reader=self.skills.read)
+        self.plugin_commands = {}
         self.plugins, self.plugin_errors = load_plugins(
             self.settings.plugins_dir, self.registry, self.hooks, self.settings,
             log=lambda msg: print(dim(msg)),
+            commands=self.plugin_commands,
         )
         for error in self.plugin_errors:
             print(yellow(f"plugin error: {error}"))
@@ -1724,6 +1770,12 @@ class Application:
         )
         self.agent.load_messages(history)
         self.agent.load_usage_state(usage)
+        self.hooks.run(
+            "on_model_change",
+            provider=self.settings.provider.name,
+            model=self.settings.model,
+            agent=self.agent,
+        )
 
     # -- session persistence ------------------------------------------------
 

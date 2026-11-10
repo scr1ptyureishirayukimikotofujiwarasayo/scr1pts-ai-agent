@@ -34,7 +34,9 @@ python ai agent/
     util.py             # colours, truncation, version
   skills/               # instruction packs, loaded on demand
   plugins/              # drop-in .py extensions (empty by default)
+  docs/PLUGIN_GUIDE_FOR_AI.md  # guide for AI agents writing plugins
   examples/plugins/     # clock.py: template plugin, not auto-loaded
+  tests/fixtures/       # test plugin used by the smoke suite
   clean.bat / clean.sh  # wipe keys, sessions, caches before sharing
   LICENSE               # MIT (put your name in it)
   SECURITY.md           # how to report issues / keep keys out of git
@@ -739,16 +741,43 @@ Hooks and their arguments:
 | hook | called with | special behaviour |
 |------|-------------|-------------------|
 | `on_start` | `agent` | after everything is wired |
+| `on_system_prompt` | `agent` | return a string to append to the prompt |
 | `on_user_message` | `text` | return a string to replace the message |
-| `on_tool_call` | `name`, `arguments` | return a dict to replace the arguments |
-| `on_tool_result` | `name`, `result`, `is_error` | observe only |
+| `on_request` | `messages`, `tools`, `agent` | mutate the outgoing request in place |
+| `on_response` | `completion`, `agent` | mutate content/reasoning/tool_calls |
+| `on_tool_call` | `name`, `arguments` | dict replaces args; **str/False vetoes** the call |
+| `on_tool_result` | `name`, `result`, `is_error` | return a string to replace the result |
 | `on_assistant_message` | `text` | observe only |
 | `on_turn_end` | `text` | observe only |
+| `on_session_change` | `kind`, `name`, `agent` | `new` / `switch` / `clear` |
+| `on_model_change` | `provider`, `model`, `agent` | after provider/model switches |
+| `on_mode_change` | `mode`, `agent` | `plan` / `build` |
+| `on_compact` | `result`, `agent` | after `/compact` |
 | `on_shutdown` | — | before exit |
 
 See `examples/plugins/clock.py` for a working example — copy it into
 `plugins/` to enable it (`/tools` then shows `now`). A fresh checkout has an
 empty `plugins/` folder, so the banner says `plugins: 0`.
+
+Plugins can do more than add tools:
+
+```python
+def register(ctx):
+    @ctx.command("deploy", args="[env]", description="ship it")   # slash command
+    def deploy(arguments):
+        print("deploying to", arguments or "staging")
+
+    ctx.prompt("## House rules\nAlways run tests before committing.")  # prompt section
+
+    ctx.hook("on_request", lambda messages, **_: messages.append(  # request shaping
+        {"role": "user", "content": "Note: the user is on Windows."}
+    ))
+```
+
+Plugin commands appear in the `/` palette and `/help`; hooks can rewrite
+requests/responses; `ctx.prompt` injects a system-prompt section. Full API and
+test patterns: **[docs/PLUGIN_GUIDE_FOR_AI.md](docs/PLUGIN_GUIDE_FOR_AI.md)** —
+written for AI agents asked to extend this harness.
 
 ## Sessions
 

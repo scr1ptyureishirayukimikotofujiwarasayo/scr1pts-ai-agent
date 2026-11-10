@@ -13,16 +13,31 @@ Drop a `.py` file (or a package folder) into `plugins/`. Each plugin may expose:
             "required": ["city"],
         })(get_weather)
 
+        # add a slash command...
+        @ctx.command("weather", args="<city>", description="show the weather")
+        def weather(arguments):
+            print(get_weather(city=arguments.strip()))
+
+        # add instructions to the system prompt...
+        ctx.prompt("Always answer in metric units.")
+
         # observe / react to agent events...
         ctx.hook("on_tool_result", lambda name, result, **_: print(name))
 
 Available hooks:
     on_start(agent)
+    on_system_prompt(agent)        -> may return extra prompt text
     on_user_message(text)          -> may return a replacement string
+    on_request(messages, tools)     -> mutate the outgoing request in place
+    on_response(completion)         -> mutate the Completion before it is used
     on_assistant_message(text)
-    on_tool_call(name, arguments)  -> may return a replacement arguments dict
-    on_tool_result(name, result, is_error)
+    on_tool_call(name, arguments)  -> dict replaces args; str/False vetoes the call
+    on_tool_result(name, result, is_error) -> may return a replacement string
     on_turn_end(text)
+    on_session_change(kind, name)   -> kind = "new" | "switch" | "clear"
+    on_model_change(provider, model)
+    on_mode_change(mode)            -> "plan" | "build"
+    on_compact(result)
     on_shutdown()
 
 A broken plugin is reported and skipped; it never takes the agent down.
@@ -93,6 +108,7 @@ class PluginContext:
         hooks: Hooks,
         settings: Settings,
         log: Callable[[str], None] = print,
+        commands: dict[str, Any] | None = None,
     ) -> None:
         self.plugin = plugin
         self.registry = registry
@@ -101,6 +117,7 @@ class PluginContext:
         self.workspace = Path(settings.workspace)
         self.root = Path(settings.plugins_dir)
         self.log = log
+        self.commands = commands if commands is not None else {}
 
     def tool(self, name: str, description: str, parameters: dict[str, Any] | None = None,
              dangerous: bool = False,
@@ -120,6 +137,37 @@ class PluginContext:
 
         return decorator
 
+    def command(
+        self, name: str, args: str = "", description: str = ""
+    ) -> Callable[[Callable[[str], Any]], Callable[[str], Any]]:
+        """Register a slash command. The handler receives the raw argument string."""
+        key = name.strip().lstrip("/")
+        if not key:
+            raise ValueError("command name must not be empty")
+
+        def decorator(func: Callable[[str], Any]) -> Callable[[str], Any]:
+            self.commands[key] = {
+                "name": key,
+                "args": args,
+                "description": description,
+                "handler": func,
+                "plugin": self.plugin.name,
+            }
+            return func
+
+        return decorator
+
+    def prompt(self, text: str) -> None:
+        """Append a section to the system prompt (handy for house rules)."""
+        value = text.strip()
+        if not value:
+            return
+        self.hooks.on(
+            "on_system_prompt",
+            lambda agent=None, **_: value,
+            owner=self.plugin.name,
+        )
+
     def hook(self, event: str, func: HookFn) -> HookFn:
         if not event.startswith("on_"):
             raise ValueError(f"hook name must start with 'on_': {event}")
@@ -133,6 +181,7 @@ def load_plugins(
     hooks: Hooks,
     settings: Settings,
     log: Callable[[str], None] = print,
+    commands: dict[str, Any] | None = None,
 ) -> tuple[list[Plugin], list[str]]:
     """Import every plugin in `directory`. Returns (plugins, errors)."""
     directory = Path(directory)
@@ -161,7 +210,9 @@ def load_plugins(
             plugin.description = str(getattr(module, "DESCRIPTION", "") or "")
             register = getattr(module, "register", None)
             if callable(register):
-                context = PluginContext(plugin, registry, hooks, settings, log=log)
+                context = PluginContext(
+                    plugin, registry, hooks, settings, log=log, commands=commands
+                )
                 register(context)
             loaded.append(plugin)
             log(f"plugin loaded: {plugin.name}" + (f" ({plugin.description})" if plugin.description else ""))
