@@ -367,11 +367,17 @@ copy plugins\myplugin.py plugins\ 2>nul
 python run.py --provider lmstudio
 ```
 ```
+> /reload            # re-import plugins/skills/MCP without restarting
 > /plugins
 > /tools
 > /help
 > /wc agent/cli.py
 ```
+
+After editing a plugin file, `/reload` is the iteration loop: it rebuilds the
+registry, re-registers commands/prompts/hooks and preserves the conversation.
+`/reload config` additionally re-reads `config.json` (useful after adding a
+provider or changing a setting).
 
 Offline, deterministic checks (no network, no key):
 
@@ -422,7 +428,7 @@ Before you say the task is done:
 - [ ] No secrets, no network at import, no blocking work.
 - [ ] Hooks mutate only what they must; they cannot veto (say so in the docstring).
 - [ ] Monkeypatches guarded against double-application.
-- [ ] Tested: `/tools`, `/help`, the command/tool itself, `/clear` still works.
+- [ ] Tested: `/reload`, `/tools`, `/help`, the command/tool itself, `/clear` still works.
 - [ ] `python tests/smoke_test.py` passes (Linux and Windows if you can).
 - [ ] README/docs updated if user-facing behavior changed.
 - [ ] You never edited core files to do something a hook/command could do.

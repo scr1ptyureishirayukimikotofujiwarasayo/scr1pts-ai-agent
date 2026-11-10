@@ -14,7 +14,16 @@ from typing import Any, Callable
 
 from .agent import Agent
 from .compact import SUMMARY_HEADING, summary_section
-from .config import ROOT, ConfigError, Settings, build_provider, load_config_file, load_settings, save_config_file
+from .config import (
+    ROOT,
+    ConfigError,
+    Settings,
+    build_provider,
+    load_config_file,
+    load_dotenv,
+    load_settings,
+    save_config_file,
+)
 from .essentials import register_essentials
 from .lineedit import LineEditor, interactive
 from .llm import REASONING_LEVELS, Client, LLMError
@@ -95,6 +104,7 @@ COMMANDS: tuple[Command, ...] = (
     Command("plugins", "", "list loaded plugins"),
     Command("system", "[text]", "show or replace the system prompt"),
     Command("verbose", "", "toggle latency / token stats"),
+    Command("reload", "[config]", "rescan plugins/skills/MCP; 'config' also re-reads config.json"),
     Command("settings", "[key] [value]", "view or change settings (save/reload/reset)"),
     Command("keys", "[list|set|clear] [provider] [key]", "list, set or clear API keys"),
     Command("mcp", "[reload|tools|path]", "list or reload MCP servers"),
@@ -108,7 +118,7 @@ COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Model", ("model", "think", "provider", "providers")),
     ("Agent", ("usage", "mode", "agents", "tools", "skills", "plugins", "system", "verbose")),
     ("Config", ("settings", "keys", "mcp")),
-    ("App", ("help", "version", "quit")),
+    ("App", ("reload", "help", "version", "quit")),
 )
 
 ALIASES = {
@@ -610,6 +620,7 @@ class Application:
             "system": self.cmd_system,
             "verbose": self.cmd_verbose,
             "settings": self.cmd_settings,
+            "reload": self.cmd_reload,
             "usage": self.cmd_usage,
             "mode": self.cmd_mode,
             "agents": self.cmd_agents,
@@ -1244,6 +1255,57 @@ class Application:
         print(VERSION)
 
     # -- commands: settings -------------------------------------------------
+
+    def cmd_reload(self, argument: str) -> None:
+        mode = argument.strip().lower()
+        if mode not in ("", "config", "all", "settings"):
+            print(yellow("usage: /reload [config]"))
+            return
+        print(dim("reloading…"))
+        if mode:
+            previous_provider = self.settings.provider.name
+            previous_model = self.settings.model
+            previous_sessions = self.settings.sessions_dir
+            try:
+                fresh = load_settings(
+                    config_path=self.settings.config_path, allow_missing_key=True
+                )
+            except ConfigError as exc:
+                print(red(f"cannot reload config: {exc}"))
+                return
+            # Keep the live model choice when that provider still exists.
+            if previous_provider in fresh.providers:
+                try:
+                    adopted = fresh.with_provider(previous_provider, previous_model)
+                    fresh.provider = adopted.provider
+                    fresh.model = adopted.model
+                except ConfigError:
+                    pass
+            self.settings = fresh
+            self.sessions = SessionStore(self.settings.sessions_dir)
+            if previous_sessions != self.settings.sessions_dir:
+                self.session_name = ""
+            print(
+                dim(
+                    f"config: {self.settings.config_path}"
+                    f" · {self.settings.provider.name}/{self.settings.model}"
+                )
+            )
+        else:
+            # Pick up newly added keys without restarting.
+            load_dotenv(self.settings.env_file)
+            try:
+                adopted = self.settings.with_provider(
+                    self.settings.provider.name, self.settings.model
+                )
+                self.settings.provider = adopted.provider
+                self.settings.model = adopted.model
+            except ConfigError as exc:
+                print(yellow(f"provider: {exc}"))
+        self._reload_capabilities()
+        if self.plugin_commands:
+            names = ", ".join("/" + name for name in sorted(self.plugin_commands))
+            print(dim(f"plugin commands: {names}"))
 
     def cmd_settings(self, argument: str) -> None:
         argument = argument.strip()

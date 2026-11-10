@@ -759,6 +759,12 @@ See `examples/plugins/clock.py` for a working example — copy it into
 `plugins/` to enable it (`/tools` then shows `now`). A fresh checkout has an
 empty `plugins/` folder, so the banner says `plugins: 0`.
 
+Write or edit a plugin, then run **`/reload`** in the REPL: it rescans
+`plugins/`, `skills/`, MCP servers and new `.env` keys, rebuilds the tool
+registry and keeps the conversation. `/reload config` also re-reads
+`config.json` (new providers, changed settings), preserving your current
+provider/model when that provider still exists.
+
 Plugins can do more than add tools:
 
 ```python
@@ -1011,7 +1017,7 @@ cancels the line (it does not quit), `Ctrl+D` or `/quit` exits.
   /new        /provider   /settings
   /sessions   /providers  /keys
   /switch     /mode       /mcp
-  /save       /agents     /usage
+  /save       /agents     /reload
   /delete     /tools      /help
   /compact    /skills     /version
   /clear      /plugins    /quit
@@ -1053,6 +1059,7 @@ commands keep working normally.
 | `/plugins` | list loaded plugins and their tools |
 | `/system [text]` | show or replace the system prompt |
 | `/verbose` | toggle latency + token stats |
+| `/reload [config]` | rescan `plugins/`, `skills/`, MCP servers and new `.env` keys; `config` also re-reads `config.json` |
 | `/settings [key] [value]` | list/change settings; `save`, `reload`, `reset [key\|all]`, `path` |
 | `/keys` | list providers with masked key status |
 | `/keys set <provider> <key>` | write a key to `.env`, validate it, load its models |

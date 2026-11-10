@@ -225,6 +225,10 @@ def main() -> None:
     check("Esc cancels the picker", pty.expect_new("cancelled", mark))
     time.sleep(0.2)  # let the line editor take over before typing again
 
+    mark = pty.mark()
+    pty.send("/reload\r")
+    check("reload works in the TUI", pty.expect_new("reloaded ·", mark))
+
     # -- streaming chat turn ------------------------------------------------
     mark = pty.mark()
     pty.send("hello there\r")

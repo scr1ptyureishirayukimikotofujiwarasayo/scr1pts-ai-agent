@@ -479,6 +479,48 @@ def main() -> None:
     check("plugin command in compact palette", any("/hello" in line for line in app.palette_lines("/")))
     plugin_out = quiet(app.handle_command, "/hello alice")
     check("plugin command dispatches", "plugin-hello alice" in plugin_out, plugin_out)
+    check("reload is in the palette", "reload" in app.command_names(""))
+
+    # -- /reload picks up new plugin files ---------------------------------
+    extra_plugin = workdir / "plugins-test" / "extra.py"
+    extra_plugin.write_text(
+        'NAME = "extra"\n'
+        'DESCRIPTION = "added after startup"\n'
+        "def register(ctx):\n"
+        "    @ctx.tool('extra_tool', 'Added later.', {'type': 'object', 'properties': {}})\n"
+        "    def extra_tool():\n"
+        "        return 'extra'\n"
+        "    @ctx.command('extra', description='added later')\n"
+        "    def extra(argument):\n"
+        "        print('extra-command', argument)\n",
+        encoding="utf-8",
+    )
+    app.agent.messages = [{"role": "user", "content": "keep me"}]
+    reload_out = quiet(app.cmd_reload, "")
+    check("reload finds new tools", "extra_tool" in app.registry.names(), reload_out)
+    check("reload finds new commands", "extra" in app.command_names(""), reload_out)
+    check(
+        "reload keeps the transcript",
+        app.agent.messages == [{"role": "user", "content": "keep me"}],
+        str(app.agent.messages),
+    )
+
+    original_config = config.read_text(encoding="utf-8")
+    tweaked = json.loads(original_config)
+    tweaked["temperature"] = 1.1
+    config.write_text(json.dumps(tweaked), encoding="utf-8")
+    quiet(app.cmd_reload, "config")
+    check(
+        "reload config applies settings",
+        abs(app.settings.temperature - 1.1) < 1e-9,
+        str(app.settings.temperature),
+    )
+    check("reload config keeps the provider", app.settings.provider.name == "smoke")
+    config.write_text(original_config, encoding="utf-8")
+    quiet(app.cmd_reload, "config")
+    check("reload config restores settings", abs(app.settings.temperature - 0.7) < 1e-9)
+    bad_reload = quiet(app.cmd_reload, "nonsense")
+    check("reload usage", "usage: /reload" in bad_reload, bad_reload)
     help_out = quiet(app.cmd_help, "")
     check("plugin command documented in /help", "hello" in help_out and "Plugins" in help_out)
     check(
