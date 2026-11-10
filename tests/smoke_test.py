@@ -24,9 +24,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from agent.agent import Agent  # noqa: E402
-from agent.config import load_settings  # noqa: E402
+from agent.config import ConfigError, load_settings  # noqa: E402
 from agent.essentials import register_essentials  # noqa: E402
-from agent.llm import Client  # noqa: E402
+from agent.llm import Client, LLMError  # noqa: E402
+from agent.models import ModelListError, fetch_models  # noqa: E402
 from agent.plugins import Hooks, load_plugins  # noqa: E402
 from agent.skills import SkillLoader, parse_frontmatter  # noqa: E402
 from agent.tools import Registry  # noqa: E402
@@ -122,8 +123,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.rstrip("/") != "/v1/models":
             self.send_error(404)
             return
-        if not (self.headers.get("authorization") or ""):
-            body = json.dumps({"error": {"message": "missing key"}}).encode()
+        if (self.headers.get("authorization") or "") != "Bearer test-key":
+            body = json.dumps({"error": {"message": "bad key"}}).encode()
             self.send_response(401)
             self.send_header("content-type", "application/json")
             self.send_header("content-length", str(len(body)))
@@ -773,7 +774,6 @@ def main() -> None:
 
     # -- compaction ---------------------------------------------------------
     from agent.compact import SUMMARY_HEADING
-    from agent.llm import LLMError
 
     def history() -> list[dict]:
         return [
@@ -994,11 +994,86 @@ def main() -> None:
         exit_code = cleanup_main(["--yes", "--root", str(share)])
     check("cleanup entrypoint exits cleanly", exit_code == 0)
 
+    # -- starting without an API key ---------------------------------------
+    import subprocess as _subprocess
+
+    os.environ.pop("NOKEY_UNSET_XYZ", None)
+    nokey_config = workdir / "nokey-config.json"
+    nokey_config.write_text(
+        json.dumps(
+            {
+                "provider": "nokey",
+                "providers": {
+                    "nokey": {
+                        "base_url": "http://127.0.0.1:1/v1",
+                        "api_key_env": ["NOKEY_UNSET_XYZ"],
+                        "default_model": "nokey-model",
+                    }
+                },
+                "mcp_enabled": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    try:
+        load_settings(config_path=nokey_config)
+        check("strict settings still require a key", False)
+    except ConfigError:
+        check("strict settings still require a key", True)
+
+    nokey = load_settings(config_path=nokey_config, allow_missing_key=True)
+    check(
+        "lenient settings start without a key",
+        nokey.provider.name == "nokey" and nokey.provider.api_key == "",
+        str(nokey.provider),
+    )
+    try:
+        Client(nokey).chat([{"role": "user", "content": "hi"}])
+        check("keyless chat gives a clear error", False)
+    except LLMError as exc:
+        check("keyless chat gives a clear error", "No API key" in str(exc), str(exc))
+    try:
+        fetch_models(nokey.provider)
+        check("keyless model fetch gives a clear error", False)
+    except ModelListError as exc:
+        check("keyless model fetch gives a clear error", "no API key" in str(exc), str(exc))
+
+    run_env = {key: value for key, value in os.environ.items() if key != "OPENROUTER_API_KEY"}
+    run_env["AGENT_OFFLINE"] = "1"
+    run_cfg = workdir / "run-nokey.json"
+    run_cfg.write_text(
+        json.dumps(
+            {
+                "provider": "openrouter",
+                "model": "",
+                "env_file": str(workdir / "empty.env"),
+                "mcp_config": str(workdir / "empty-mcp.json"),
+                "sessions_dir": str(workdir / "nokey-sessions"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workdir / "empty.env").write_text("", encoding="utf-8")
+    proc = _subprocess.run(
+        [sys.executable, "run.py", "--config", str(run_cfg)],
+        input="/keys\n/exit\n",
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env=run_env,
+        timeout=120,
+    )
+    check("run.py starts without an API key", proc.returncode == 0, proc.stderr[-400:])
+    check(
+        "run.py points at /keys and /provider",
+        "no API key for openrouter" in proc.stdout and "OPENROUTER_API_KEY" in proc.stdout,
+        proc.stdout[-500:],
+    )
+
     # -- model discovery + picker ------------------------------------------
     import builtins
 
     from agent.config import Provider
-    from agent.models import ModelListError, fetch_models
     from agent.picker import select as pick_model
 
     fetched = fetch_models(settings.provider)
@@ -1010,6 +1085,15 @@ def main() -> None:
     )
     try:
         fetch_models(unauthorized)
+        check("missing key rejected before the request", False)
+    except ModelListError as exc:
+        check("missing key rejected before the request", "no api key" in str(exc).lower(), str(exc))
+
+    wrong_key = Provider(
+        name="smoke", base_url=settings.provider.base_url, model="x", api_key="wrong-key"
+    )
+    try:
+        fetch_models(wrong_key)
         check("bad key rejected", False)
     except ModelListError as exc:
         check("bad key rejected", "401" in str(exc), str(exc))

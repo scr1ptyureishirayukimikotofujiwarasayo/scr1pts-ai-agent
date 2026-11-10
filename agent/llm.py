@@ -68,6 +68,12 @@ class Client:
         stream: bool | None = None,
     ) -> Completion:
         provider = self.settings.provider
+        if provider.requires_key and not provider.api_key:
+            raise LLMError(
+                f"No API key for provider '{provider.name}'. "
+                f"Set one with /keys set {provider.name} <key> (or add it to .env), "
+                "or switch with /provider <name>."
+            )
         use_stream = self.settings.stream if stream is None else stream
         # Streaming only makes sense when the caller can consume deltas.
         if on_delta is None:

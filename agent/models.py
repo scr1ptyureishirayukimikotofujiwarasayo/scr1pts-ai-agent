@@ -22,6 +22,10 @@ def models_url(base_url: str) -> str:
 
 def fetch_models(provider: Provider, timeout: float = 20.0) -> list[str]:
     """Return sorted model ids. Raises ModelListError with an actionable message."""
+    if provider.requires_key and not provider.api_key:
+        raise ModelListError(
+            f"no API key for '{provider.name}' · /keys set {provider.name} <key>"
+        )
     url = models_url(provider.base_url)
     request = urllib.request.Request(url, headers=build_headers(provider), method="GET")
     try:

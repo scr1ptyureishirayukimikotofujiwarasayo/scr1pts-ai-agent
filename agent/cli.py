@@ -180,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             provider=args.provider,
             model=args.model,
             workspace=Path(args.workspace) if args.workspace else None,
+            allow_missing_key=True,  # keys can be added from inside the REPL
         )
     except ConfigError as exc:
         print(red(f"Configuration error: {exc}"), file=sys.stderr)
@@ -354,6 +355,14 @@ class Application:
             + dim(f"  ·  {self.settings.provider.name}/{self.settings.model}")
             + (yellow("  ·  mode: plan (read-only)") if self.settings.mode == "plan" else "")
         )
+        if self.settings.provider.requires_key and not self.settings.provider.api_key:
+            print(
+                yellow(f"no API key for {self.settings.provider.name}")
+                + dim(
+                    f"  ·  /keys set {self.settings.provider.name} <key>"
+                    "  ·  /provider <name> to switch  ·  /keys to list"
+                )
+            )
         print(dim(f"workspace: {self.settings.workspace}"))
         print(
             dim(
@@ -913,6 +922,14 @@ class Application:
 
     def _check_provider_key(self) -> list[str]:
         """Validate the active key by listing models; cache the catalogue."""
+        if self.settings.provider.requires_key and not self.settings.provider.api_key:
+            print(
+                dim(
+                    f"no API key for '{self.settings.provider.name}' yet"
+                    f" · /keys set {self.settings.provider.name} <key>"
+                )
+            )
+            return []
         try:
             models = fetch_models(self.settings.provider, timeout=min(self.settings.timeout, 20))
         except ModelListError as exc:
@@ -1213,7 +1230,9 @@ class Application:
 
     def _reload_settings(self) -> None:
         try:
-            self.settings = load_settings(config_path=self.settings.config_path)
+            self.settings = load_settings(
+                config_path=self.settings.config_path, allow_missing_key=True
+            )
         except ConfigError as exc:
             print(red(f"cannot reload settings: {exc}"))
             return

@@ -244,8 +244,10 @@ class Settings:
     config_path: Path = ROOT / "config.json"
     providers: dict[str, dict[str, Any]] = field(default_factory=dict)
 
-    def with_provider(self, name: str, model: str | None = None) -> "Settings":
-        provider = build_provider(name, self.providers)
+    def with_provider(
+        self, name: str, model: str | None = None, require_key: bool = False
+    ) -> "Settings":
+        provider = build_provider(name, self.providers, require_key=require_key)
         return replace(self, provider=provider, model=model or provider.model)
 
 
@@ -262,7 +264,9 @@ def _env(*names: str) -> str:
     return ""
 
 
-def build_provider(name: str, providers: dict[str, dict[str, Any]]) -> Provider:
+def build_provider(
+    name: str, providers: dict[str, dict[str, Any]], require_key: bool = True
+) -> Provider:
     name = name.strip().lower()
     spec = providers.get(name)
     if spec is None:
@@ -279,7 +283,7 @@ def build_provider(name: str, providers: dict[str, dict[str, Any]]) -> Provider:
     api_key = _env(*key_envs) or spec.get("api_key", "")
 
     requires_key = spec.get("requires_key", True)
-    if requires_key and not api_key:
+    if require_key and requires_key and not api_key:
         env_hint = " or ".join(key_envs) or "an api key"
         raise ConfigError(
             f"No API key for provider {name!r}. Set {env_hint} in your .env file "
@@ -333,6 +337,7 @@ def load_settings(
     provider: str | None = None,
     model: str | None = None,
     workspace: Path | None = None,
+    allow_missing_key: bool = False,
     **overrides: Any,
 ) -> Settings:
     config_file = Path(config_path or ROOT / "config.json").resolve()
@@ -348,7 +353,9 @@ def load_settings(
         or file_cfg.get("provider")
         or "openrouter"
     )
-    built = build_provider(str(provider_name), providers)
+    built = build_provider(
+        str(provider_name), providers, require_key=not allow_missing_key
+    )
     chosen_model = model or os.environ.get("AGENT_MODEL") or file_cfg.get("model") or built.model
 
     def path(key: str, default: Path) -> Path:

@@ -61,6 +61,18 @@ No dependencies, no virtualenv required: any Python 3.10+ works. If your
 `python` isn't on `PATH`, call it directly (e.g.
 `C:\Python312\python.exe run.py`).
 
+**No key yet? It still starts.** The harness launches without an API key and
+shows `no API key for openrouter · /keys set openrouter <key> · /provider <name>`.
+From inside the REPL you can set keys, pick a provider and pick a model:
+
+```
+> /keys set openrouter sk-or-v1-...
+> /provider venice
+> /keys set venice vn-...
+> /model
+> explain this codebase
+```
+
 Once inside, just type. Useful starts:
 
 ```
@@ -706,7 +718,9 @@ time. The folder is created automatically on startup.
 ## API keys (`/keys`)
 
 Keys live in `.env` (git-ignored). `/keys` shows them masked, sets them, and —
-the important part — clears them.
+the important part — clears them. The CLI starts without any key, so this is
+also the first-run setup path; `load_settings()` (the Python API) stays strict
+unless you pass `allow_missing_key=True`.
 
 ```
 > /keys
@@ -1067,8 +1081,11 @@ Suggested repository settings: description + topics (`ai-agent`, `llm`,
 
 ## Troubleshooting
 
-- `Configuration error: No API key for provider ...` → fill `.env`, or switch to
-  `--provider ollama` / `lmstudio` for local models.
+- `Model error: No API key for provider ...` → the harness started fine; set the
+  key with `/keys set <provider> <key>` (or in `.env`), or `/provider ollama`
+  / `lmstudio` for local models.
+- `Configuration error: ...` at launch → something other than a missing key
+  (unknown provider, invalid `mode`/`shell`, broken JSON). Fix `config.json`.
 - `HTTP 401` → key wrong for that provider (OpenRouter keys don't work on Groq).
 - `HTTP 404 model not found` → model id must match the provider's catalogue
   (e.g. `anthropic/claude-sonnet-4.5` on OpenRouter vs `claude-sonnet-4-5` on
