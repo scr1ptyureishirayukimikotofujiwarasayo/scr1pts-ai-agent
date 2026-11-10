@@ -225,6 +225,17 @@ def main() -> None:
     os.environ["SMOKE_API_KEY"] = "test-key"
 
     (workdir / "empty-mcp.json").write_text('{"mcpServers": {}}', encoding="utf-8")
+    (workdir / "plugins-test").mkdir(parents=True, exist_ok=True)
+    (workdir / "plugins-test" / "demo.py").write_text(
+        'NAME = "demo"\n'
+        'DESCRIPTION = "Test plugin"\n'
+        "def register(ctx):\n"
+        "    @ctx.tool('now', 'Current time.', {'type': 'object', 'properties': {}})\n"
+        "    def now():\n"
+        "        return '12:00'\n"
+        "    ctx.hook('on_turn_end', lambda text: None)\n",
+        encoding="utf-8",
+    )
     config = workdir / "config.json"
     config.write_text(
         json.dumps(
@@ -235,7 +246,7 @@ def main() -> None:
                 "auto_save": False,
                 "workspace": str(workdir),
                 "skills_dir": str(workdir / "skills"),
-                "plugins_dir": str(ROOT / "plugins"),
+                "plugins_dir": str(workdir / "plugins-test"),
                 "mcp_config": str(workdir / "empty-mcp.json"),
                 "providers": {
                     "smoke": {

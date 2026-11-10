@@ -33,7 +33,8 @@ python ai agent/
     cli.py              # terminal UI, slash commands, saved sessions
     util.py             # colours, truncation, version
   skills/               # instruction packs, loaded on demand
-  plugins/              # drop-in .py extensions (tools + hooks)
+  plugins/              # drop-in .py extensions (empty by default)
+  examples/plugins/     # clock.py: template plugin, not auto-loaded
   clean.bat / clean.sh  # wipe keys, sessions, caches before sharing
   LICENSE               # MIT (put your name in it)
   SECURITY.md           # how to report issues / keep keys out of git
@@ -693,7 +694,9 @@ Hooks and their arguments:
 | `on_turn_end` | `text` | observe only |
 | `on_shutdown` | — | before exit |
 
-See `plugins/clock.py` for a working example (`/tools` then shows `now`).
+See `examples/plugins/clock.py` for a working example — copy it into
+`plugins/` to enable it (`/tools` then shows `now`). A fresh checkout has an
+empty `plugins/` folder, so the banner says `plugins: 0`.
 
 ## Sessions
 
