@@ -1,0 +1,40 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# conversations and local state
+sessions/*.json
+sessions/*.json.tmp
+
+# caches / build artefacts
+.cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+build/
+dist/
+*.egg-info/
+
+# virtual envs
+.venv/
+venv/
+env/
+
+# logs and OS noise
+*.log
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# editors
+.idea/
+.vscode/
+*.swp
+*~
+
+# local overrides
+*.local.json
