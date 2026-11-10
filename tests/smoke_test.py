@@ -151,6 +151,15 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length) or b"{}")
         STATE["last_body"] = body
         STATE["calls"] += 1
+        if STATE.get("reject_reasoning") and ("reasoning" in body or "reasoning_effort" in body):
+            STATE["reject_reasoning"] = False
+            data = json.dumps({"error": {"message": "Unsupported parameter: reasoning_effort"}}).encode()
+            self.send_response(400)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         has_tool_result = any(m.get("role") == "tool" for m in body["messages"])
         auth = self.headers.get("authorization") or ""
 
@@ -434,6 +443,7 @@ def main() -> None:
     check("settings saved", written["temperature"] == 0.25 and written["max_steps"] == 7)
     check("shell persisted", written.get("shell") == "auto")
     check("show_usage persisted", written.get("show_usage") is True)
+    check("reasoning effort persisted", written.get("reasoning_effort") == "auto")
     check("settings keep providers", "smoke" in (written.get("providers") or {}))
     check(
         "settings save mcp/env keys",
@@ -1332,6 +1342,59 @@ def main() -> None:
         app.agent.total_usage == usage_before and bool(app.agent.usage_by_model),
         f"{app.agent.total_usage} vs {usage_before}",
     )
+
+    # -- thinking / reasoning effort ---------------------------------------
+    from agent.llm import reasoning_payload
+
+    check(
+        "openrouter reasoning shape",
+        reasoning_payload("openrouter", "high") == {"reasoning": {"effort": "high"}},
+    )
+    check(
+        "openrouter minimal maps to low",
+        reasoning_payload("openrouter", "minimal") == {"reasoning": {"effort": "low"}},
+    )
+    check(
+        "flat reasoning shape",
+        reasoning_payload("openai", "medium") == {"reasoning_effort": "medium"},
+    )
+    check("auto sends no reasoning field", reasoning_payload("openai", "auto") == {})
+
+    app.settings.reasoning_effort = "high"
+    app.settings.stream = False
+    app.agent.run_turn("reasoning check")
+    check(
+        "thinking effort is sent with the request",
+        STATE["last_body"].get("reasoning_effort") == "high",
+        str({k: v for k, v in STATE["last_body"].items() if "reason" in k}),
+    )
+
+    STATE["reject_reasoning"] = True
+    app.agent.run_turn("reasoning retry")
+    check(
+        "rejected thinking effort is retried without it",
+        "reasoning_effort" not in STATE["last_body"]
+        and STATE.get("reject_reasoning") is False,
+        str(STATE["last_body"].get("reasoning_effort")),
+    )
+
+    think_out = quiet(app.cmd_think, "medium")
+    check(
+        "think command sets effort",
+        app.settings.reasoning_effort == "medium"
+        and "thinking effort -> medium" in think_out,
+        think_out,
+    )
+    quiet(app.cmd_think, "bogus")
+    check("invalid effort rejected", app.settings.reasoning_effort == "medium")
+    shown = quiet(app.cmd_think, "")
+    check(
+        "think shows state and model support",
+        "thinking effort: medium" in shown and "reasoning-capable" in shown,
+        shown,
+    )
+    quiet(app.cmd_think, "auto")
+    check("effort reset to auto", app.settings.reasoning_effort == "auto")
 
     # -- command palette ----------------------------------------------------
     from agent.lineedit import LineEditor

@@ -288,6 +288,7 @@ Unknown keys are preserved.
 | `system_prompt` | string | `""` | custom system prompt; empty = built-in prompt |
 | `mode` | `"plan"` \| `"build"` | `"build"` | start in read-only planning mode or full build mode |
 | `shell` | `auto` \| `bash` \| `sh` \| `cmd` | `"auto"` | shell used by `run_command`; `auto` prefers bash |
+| `reasoning_effort` | `auto` \| `minimal` \| `low` \| `medium` \| `high` | `"auto"` | thinking effort for reasoning models |
 
 ### Paths
 
@@ -451,6 +452,34 @@ mode -> build · full access restored
   filesystem-write tool is blocked by default. Plugin tools can opt in with
   `ctx.tool(..., read_only=True)`.
 
+### Thinking effort (`/think`)
+
+Reasoning models trade latency and tokens for depth. Set that budget explicitly:
+
+```
+> /think
+thinking effort: auto  ·  openrouter/anthropic/claude-sonnet-4.5
+this model is marked reasoning-capable in models.dev
+set with /think minimal|low|medium|high · auto = provider default
+
+> /think high
+thinking effort -> high · applies to reasoning models · /settings save to persist
+```
+
+- Levels: `auto` (default, send nothing), `minimal`, `low`, `medium`, `high`.
+- Wire format is provider-shaped: OpenRouter gets
+  `"reasoning": {"effort": "high"}` (its `minimal` maps to `low`, which it
+  doesn't document); everyone else gets `"reasoning_effort": "high"`.
+- Support is read from models.dev's `reasoning` flag: `/think` tells you whether
+  the current model is marked reasoning-capable. If it isn't, the harness still
+  tries, and a `400` mentioning reasoning is retried **once without the
+  parameter**, remembered per provider — so a wrong guess can't break the turn.
+- The banner shows `thinking: high` whenever it isn't `auto`, and context/token/
+  cost lines reflect the larger replies automatically.
+- Persist with `/settings save`; also available as `/settings reasoning_effort`
+  and as a hand-edited `config.json` key. Aliases: `/reasoning`, `/effort`,
+  `/thinking`.
+
 ## Python-first execution
 
 The harness pushes Python as the default way to get things done, because it is
@@ -555,6 +584,7 @@ and written back to `config.json` when you like the result.
 | `system_prompt` | text | replaces the prompt (empty string = built-in) |
 | `mode` | plan/build | read-only, or restored full access |
 | `shell` | auto/bash/sh/cmd | how the next `run_command` is executed |
+| `reasoning_effort` | auto/minimal/low/medium/high | thinking effort for reasoning models |
 | `env_file` | path | where `/keys` reads/writes API keys |
 | `mcp_config` | path | reconnect MCP servers from this file |
 | `mcp_enabled` | on/off | connect MCP servers at startup |
@@ -927,14 +957,15 @@ cancels the line (it does not quit), `Ctrl+D` or `/quit` exits.
 
 ```
 > /
-  /new        /provider   /verbose
-  /sessions   /providers  /settings
-  /switch     /mode       /keys
-  /save       /agents     /mcp
-  /delete     /tools      /usage
-  /compact    /skills     /help
-  /clear      /plugins    /version
-  /model      /system     /quit
+  /new        /provider   /settings
+  /sessions   /providers  /keys
+  /switch     /mode       /mcp
+  /save       /agents     /usage
+  /delete     /tools      /help
+  /compact    /skills     /version
+  /clear      /plugins    /quit
+  /model      /system
+  /think      /verbose
   Tab completes · Enter runs · /help for details
 
 > /sw
@@ -958,6 +989,7 @@ commands keep working normally.
 | `/compact [turns\|show]` | fold older turns into a summary, keep recent ones verbatim |
 | `/clear` | forget the transcript and the compaction summary |
 | `/model` | fetch the catalogue (validates the key) and open the ↑/↓ picker |
+| `/think [level]` | show/set thinking effort (`/reasoning`, `/effort`, `/thinking`) |
 | `/model list`, `/model <id>` | print the catalogue, or set a model directly (`/models` alias) |
 | `/model info`, `/model refresh` | models.dev details for the current model, or re-fetch lists |
 | `/provider <name> [model]` | switch provider (key must exist in `.env`) |

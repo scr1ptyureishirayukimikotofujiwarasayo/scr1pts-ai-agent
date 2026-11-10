@@ -22,6 +22,12 @@ class Setting:
 SETTINGS: tuple[Setting, ...] = (
     Setting("mode", "enum", "execution mode", choices=("plan", "build")),
     Setting("shell", "enum", "shell for run_command (auto prefers bash)", choices=("auto", "bash", "sh", "cmd")),
+    Setting(
+        "reasoning_effort",
+        "enum",
+        "thinking effort for reasoning models",
+        choices=("auto", "minimal", "low", "medium", "high"),
+    ),
     Setting("provider", "str", "model provider (see /providers)"),
     Setting("model", "str", "model id for the active provider"),
     Setting("temperature", "float", "sampling temperature, 0-2", 0.0, 2.0),
@@ -89,6 +95,7 @@ DEFAULTS: dict[str, Any] = {
     "system_prompt": "",
     "mode": "build",
     "shell": "auto",
+    "reasoning_effort": "auto",
     "mcp_enabled": True,
     "mcp_timeout": 30,
 }

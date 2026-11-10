@@ -56,6 +56,7 @@ CLEAN_CONFIG: dict[str, object] = {
     "verbose": False,
     "mode": "build",
     "shell": "auto",
+    "reasoning_effort": "auto",
     "workspace": ".",
     "skills_dir": "skills",
     "plugins_dir": "plugins",

@@ -237,6 +237,7 @@ class Settings:
     verbose: bool = False
     mode: str = "build"  # "plan" (read-only) or "build"
     shell: str = "auto"  # auto | bash | sh | cmd (run_command only)
+    reasoning_effort: str = "auto"  # auto | minimal | low | medium | high
     env_file: Path = ROOT / ".env"
     mcp_config: Path = ROOT / "mcp.json"
     mcp_enabled: bool = True
@@ -385,6 +386,7 @@ def load_settings(
         verbose=bool(file_cfg.get("verbose", False)),
         mode=str(file_cfg.get("mode", "build")).strip().lower(),
         shell=str(file_cfg.get("shell", "auto")).strip().lower(),
+        reasoning_effort=str(file_cfg.get("reasoning_effort", "auto")).strip().lower(),
         env_file=env_file,
         mcp_config=path("mcp_config", ROOT / "mcp.json"),
         mcp_enabled=bool(file_cfg.get("mcp_enabled", True)),
@@ -397,6 +399,11 @@ def load_settings(
     if settings.shell not in ("auto", "bash", "sh", "cmd"):
         raise ConfigError(
             f"shell must be one of auto, bash, sh, cmd, got {settings.shell!r}"
+        )
+    if settings.reasoning_effort not in ("auto", "minimal", "low", "medium", "high"):
+        raise ConfigError(
+            "reasoning_effort must be one of auto, minimal, low, medium, high, "
+            f"got {settings.reasoning_effort!r}"
         )
     for key, value in overrides.items():
         if value is not None and hasattr(settings, key):

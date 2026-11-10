@@ -13,6 +13,19 @@ from typing import Any, Callable
 from .config import Settings
 from .util import VERSION
 
+REASONING_LEVELS = ("auto", "minimal", "low", "medium", "high")
+
+
+def reasoning_payload(provider_name: str, effort: str | None) -> dict[str, Any]:
+    """Provider-shaped reasoning parameter. Empty for auto/off/unknown."""
+    level = (effort or "auto").strip().lower()
+    if level in ("", "auto", "off", "none"):
+        return {}
+    if provider_name == "openrouter":
+        # OpenRouter uses a nested object; "minimal" isn't a documented level.
+        return {"reasoning": {"effort": "low" if level == "minimal" else level}}
+    return {"reasoning_effort": level}
+
 DeltaFn = Callable[[str], None]
 
 
@@ -58,6 +71,7 @@ class Client:
         self.settings = settings
         self.retries = retries
         self._stream_usage_off = False
+        self._reasoning_off: set[str] = set()
 
     # -- public API ---------------------------------------------------------
 
@@ -92,6 +106,8 @@ class Client:
             body["tool_choice"] = "auto"
         if use_stream and not self._stream_usage_off:
             body["stream_options"] = {"include_usage": True}
+        if provider.name not in self._reasoning_off:
+            body.update(reasoning_payload(provider.name, self.settings.reasoning_effort))
 
         payload = json.dumps(body).encode("utf-8")
         headers = build_headers(
@@ -119,6 +135,17 @@ class Client:
                     # provider rejects usage reporting; retry without it once
                     body.pop("stream_options", None)
                     self._stream_usage_off = True
+                    payload = json.dumps(body).encode("utf-8")
+                    continue
+                if (
+                    exc.code == 400
+                    and "reasoning" in detail.lower()
+                    and ("reasoning" in body or "reasoning_effort" in body)
+                ):
+                    # model/provider doesn't accept thinking effort; drop it
+                    body.pop("reasoning", None)
+                    body.pop("reasoning_effort", None)
+                    self._reasoning_off.add(provider.name)
                     payload = json.dumps(body).encode("utf-8")
                     continue
                 if exc.code in (408, 409, 429) or exc.code >= 500:

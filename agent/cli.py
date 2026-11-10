@@ -17,7 +17,7 @@ from .compact import SUMMARY_HEADING, summary_section
 from .config import ROOT, ConfigError, Settings, build_provider, load_config_file, load_settings, save_config_file
 from .essentials import register_essentials
 from .lineedit import LineEditor, interactive
-from .llm import Client, LLMError
+from .llm import REASONING_LEVELS, Client, LLMError
 from .mcp import MCPClient, connect_servers, load_mcp_config, stop_clients
 from .models import ModelListError, fetch_models
 from .modelsdev import describe as describe_model
@@ -84,6 +84,7 @@ COMMANDS: tuple[Command, ...] = (
     Command("compact", "[keep-turns|show]", "summarise older turns, keep recent ones"),
     Command("clear", "", "forget the conversation in this session"),
     Command("model", "[name|list|info]", "pick a model (↑/↓ + Enter) or set one directly"),
+    Command("think", "[auto|minimal|low|medium|high]", "thinking effort for reasoning models"),
     Command("provider", "<name> [model]", "switch provider"),
     Command("providers", "", "list configured providers"),
     Command("usage", "", "context %, tokens and estimated cost"),
@@ -104,7 +105,7 @@ COMMANDS: tuple[Command, ...] = (
 
 COMMAND_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Sessions", ("new", "sessions", "switch", "save", "delete", "compact", "clear")),
-    ("Model", ("model", "provider", "providers")),
+    ("Model", ("model", "think", "provider", "providers")),
     ("Agent", ("usage", "mode", "agents", "tools", "skills", "plugins", "system", "verbose")),
     ("Config", ("settings", "keys", "mcp")),
     ("App", ("help", "version", "quit")),
@@ -129,6 +130,9 @@ ALIASES = {
     "key": "keys",
     "servers": "mcp",
     "models": "model",
+    "reasoning": "think",
+    "effort": "think",
+    "thinking": "think",
     "cost": "usage",
     "tokens": "usage",
     "context": "usage",
@@ -374,6 +378,11 @@ class Application:
         print(
             bold(f"python ai agent {VERSION}")
             + dim(f"  ·  {self.settings.provider.name}/{self.settings.model}")
+            + (
+                dim(f"  ·  thinking: {self.settings.reasoning_effort}")
+                if self.settings.reasoning_effort != "auto"
+                else ""
+            )
             + (yellow("  ·  mode: plan (read-only)") if self.settings.mode == "plan" else "")
         )
         if self.settings.provider.requires_key and not self.settings.provider.api_key:
@@ -504,6 +513,7 @@ class Application:
             "compact": self.cmd_compact,
             "clear": self.cmd_clear,
             "model": self.cmd_model,
+            "think": self.cmd_think,
             "provider": self.cmd_provider,
             "providers": self.cmd_providers,
             "tools": self.cmd_tools,
@@ -877,6 +887,40 @@ class Application:
         for label, value in model_info(meta):
             print(f"  {label:<12} {value}")
 
+    def cmd_think(self, argument: str) -> None:
+        value = argument.strip().lower()
+        if not value:
+            current = self.settings.reasoning_effort or "auto"
+            print(
+                f"thinking effort: {bold(current)}"
+                + dim(f"  ·  {self.settings.provider.name}/{self.settings.model}")
+            )
+            meta = self._usage_meta(self.settings.provider.name, self.settings.model)
+            if meta is None:
+                print(dim("model not in the models.dev catalogue · /model refresh to load metadata"))
+            elif meta.get("reasoning") is True:
+                print(green("this model is marked reasoning-capable in models.dev"))
+            else:
+                print(
+                    yellow(
+                        "this model is not marked as reasoning-capable · "
+                        "the parameter is dropped if the provider rejects it"
+                    )
+                )
+            print(dim("set with /think minimal|low|medium|high · auto = provider default"))
+            return
+        if value not in REASONING_LEVELS:
+            print(red(f"effort must be one of: {', '.join(REASONING_LEVELS)}"))
+            return
+        self.settings.reasoning_effort = value
+        if value == "auto":
+            print(green("thinking effort -> auto") + dim(" · provider default"))
+            return
+        print(
+            green(f"thinking effort -> {value}")
+            + dim(" · applies to reasoning models · /settings save to persist")
+        )
+
     def _fetch_models(self, force: bool = False) -> list[str]:
         name = self.settings.provider.name
         if not force and name in self._model_cache:
@@ -1246,6 +1290,7 @@ class Application:
                 "verbose": self.settings.verbose,
                 "mode": self.settings.mode,
                 "shell": self.settings.shell,
+                "reasoning_effort": self.settings.reasoning_effort,
                 "workspace": _config_path(self.settings.workspace),
                 "skills_dir": _config_path(self.settings.skills_dir),
                 "plugins_dir": _config_path(self.settings.plugins_dir),
