@@ -234,6 +234,7 @@ class Settings:
     auto_save: bool = True
     show_tool_results: bool = True
     show_usage: bool = True
+    show_reasoning: bool = False
     verbose: bool = False
     mode: str = "build"  # "plan" (read-only) or "build"
     shell: str = "auto"  # auto | bash | sh | cmd (run_command only)
@@ -383,6 +384,7 @@ def load_settings(
         auto_save=bool(file_cfg.get("auto_save", True)),
         show_tool_results=bool(file_cfg.get("show_tool_results", True)),
         show_usage=bool(file_cfg.get("show_usage", True)),
+        show_reasoning=bool(file_cfg.get("show_reasoning", False)),
         verbose=bool(file_cfg.get("verbose", False)),
         mode=str(file_cfg.get("mode", "build")).strip().lower(),
         shell=str(file_cfg.get("shell", "auto")).strip().lower(),

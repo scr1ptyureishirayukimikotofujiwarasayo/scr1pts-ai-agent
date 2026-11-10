@@ -11,6 +11,7 @@
   "auto_save": true,
   "show_tool_results": true,
   "show_usage": true,
+  "show_reasoning": false,
   "verbose": false,
   "mode": "build",
   "shell": "auto",

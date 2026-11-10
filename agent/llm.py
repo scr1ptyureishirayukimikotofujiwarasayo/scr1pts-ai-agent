@@ -27,6 +27,7 @@ def reasoning_payload(provider_name: str, effort: str | None) -> dict[str, Any]:
     return {"reasoning_effort": level}
 
 DeltaFn = Callable[[str], None]
+ReasoningFn = Callable[[str], None]
 
 
 class LLMError(RuntimeError):
@@ -52,6 +53,7 @@ class ToolCall:
 @dataclass
 class Completion:
     content: str = ""
+    reasoning: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
@@ -80,6 +82,7 @@ class Client:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         on_delta: DeltaFn | None = None,
+        on_reasoning: ReasoningFn | None = None,
         stream: bool | None = None,
     ) -> Completion:
         provider = self.settings.provider
@@ -122,7 +125,7 @@ class Client:
             try:
                 with urllib.request.urlopen(request, timeout=self.settings.timeout) as response:
                     if use_stream:
-                        return self._read_stream(response, on_delta)
+                        return self._read_stream(response, on_delta, on_reasoning)
                     return self._read_json(response)
             except urllib.error.HTTPError as exc:
                 detail = _read_error_body(exc)
@@ -177,6 +180,7 @@ class Client:
         message = choice.get("message") or {}
         completion = Completion(
             content=_as_text(message.get("content")),
+            reasoning=_as_text(message.get("reasoning") or message.get("reasoning_content")),
             finish_reason=str(choice.get("finish_reason") or ""),
             usage=data.get("usage") or {},
         )
@@ -184,7 +188,9 @@ class Client:
             completion.tool_calls.append(_parse_tool_call(call))
         return completion
 
-    def _read_stream(self, response: Any, on_delta: DeltaFn) -> Completion:
+    def _read_stream(
+        self, response: Any, on_delta: DeltaFn, on_reasoning: ReasoningFn | None = None
+    ) -> Completion:
         completion = Completion()
         partial: dict[int, dict[str, str]] = {}
 
@@ -203,6 +209,11 @@ class Client:
                 completion.usage = chunk["usage"]
             for choice in chunk.get("choices") or []:
                 delta = choice.get("delta") or {}
+                thought = _as_text(delta.get("reasoning") or delta.get("reasoning_content"))
+                if thought:
+                    completion.reasoning += thought
+                    if on_reasoning:
+                        on_reasoning(thought)
                 piece = _as_text(delta.get("content"))
                 if piece:
                     completion.content += piece

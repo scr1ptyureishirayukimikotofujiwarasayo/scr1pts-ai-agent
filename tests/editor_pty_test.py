@@ -53,6 +53,26 @@ CATALOG = {
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+    def do_POST(self):
+        length = int(self.headers.get("content-length") or 0)
+        self.rfile.read(length)
+        chunks = [
+            {"choices": [{"delta": {"reasoning": "considering the request"}}]},
+            {"choices": [{"delta": {"content": "Hello "}}]},
+            {"choices": [{"delta": {"content": "there"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+            {"choices": [], "usage": {"prompt_tokens": 12, "completion_tokens": 5}},
+        ]
+        payload = b"".join(
+            f"data: {json.dumps(chunk)}\\n\\n".encode() for chunk in chunks
+        ) + b"data: [DONE]\\n\\n"
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream")
+        self.send_header("content-length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_GET(self):
         if self.path == "/api.json":
             payload = CATALOG
@@ -204,6 +224,21 @@ def main() -> None:
     pty.send("\x1b")  # Esc cancels
     check("Esc cancels the picker", pty.expect_new("cancelled", mark))
     time.sleep(0.2)  # let the line editor take over before typing again
+
+    # -- streaming chat turn ------------------------------------------------
+    mark = pty.mark()
+    pty.send("hello there\r")
+    check("reply streams into the terminal", pty.expect_new("Hello ", mark))
+    check("second token arrives", pty.expect_new("there", mark))
+    check("usage line follows the reply", pty.expect_new("ctx", mark))
+    check("session tokens counted", pty.expect_new("session", mark))
+
+    mark = pty.mark()
+    pty.send("/clear\r")
+    check("clear repaints the screen", pty.expect_new("conversation cleared", mark))
+    check("clear emits an ANSI erase", "\x1b[2J" in pty.buffer[mark:])
+    check("clear reprints the header", pty.expect_new("python ai agent", mark))
+    check("prompt returns after clear", pty.expect_new("> ", mark))
 
     pty.send("/quit\r")
     time.sleep(0.3)

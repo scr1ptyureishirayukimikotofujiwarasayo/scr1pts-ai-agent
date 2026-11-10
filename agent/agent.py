@@ -260,6 +260,7 @@ class Agent:
         on_delta: Callable[[str], None] | None = None,
         on_tool: Callable[[str, dict[str, Any]], None] | None = None,
         on_tool_result: Callable[[str, str, bool], None] | None = None,
+        on_reasoning: Callable[[str], None] | None = None,
     ) -> str:
         """Run one user turn to completion. Returns the final assistant text."""
         replacement = self.hooks.first_result("on_user_message", text=user_text)
@@ -269,7 +270,7 @@ class Agent:
 
         final_text = ""
         for step in range(1, max(1, self.settings.max_steps) + 1):
-            completion = self._complete(on_delta)
+            completion = self._complete(on_delta, on_reasoning)
 
             if not completion.tool_calls:
                 final_text = completion.content
@@ -289,13 +290,18 @@ class Agent:
         self.messages.append({"role": "assistant", "content": text})
         return text
 
-    def _complete(self, on_delta: Callable[[str], None] | None) -> Completion:
+    def _complete(
+        self,
+        on_delta: Callable[[str], None] | None,
+        on_reasoning: Callable[[str], None] | None = None,
+    ) -> Completion:
         try:
             only = self.registry.read_only_names() if self.settings.mode == "plan" else None
             completion = self.client.chat(
                 self._request_messages(),
                 tools=self.registry.specs(only=only),
                 on_delta=on_delta,
+                on_reasoning=on_reasoning,
             )
         except LLMError:
             # Drop the dangling user message so the session stays usable.

@@ -186,6 +186,7 @@ class Handler(BaseHTTPRequestHandler):
         chunks = [] if has_tool_result else TOOL_CALL_STREAM
         if has_tool_result:
             chunks = [
+                {"choices": [{"delta": {"reasoning": "let me think"}}]},
                 {"choices": [{"delta": {"content": "done"}}]},
                 {"choices": [{"delta": {}, "finish_reason": "stop"}]},
             ]
@@ -314,15 +315,18 @@ def main() -> None:
     client = Client(settings)
     agent = Agent(settings, client, registry, skills, hooks)
     streamed: list[str] = []
+    reasoned: list[str] = []
     tools_used: list[str] = []
     final = agent.run_turn(
         "write hello.txt",
         on_delta=streamed.append,
+        on_reasoning=reasoned.append,
         on_tool=lambda name, args: tools_used.append(name),
     )
     check("tool was executed", tools_used == ["write_file"], str(tools_used))
     check("tool wrote the file", (workdir / "hello.txt").read_text() == "hi")
     check("final answer streamed", final == "done" and "".join(streamed) == "done", f"{final!r}")
+    check("reasoning streamed separately", "".join(reasoned) == "let me think", repr("".join(reasoned)))
     check("request count", STATE["calls"] == 2, str(STATE["calls"]))
     check(
         "tool result fed back",
@@ -444,6 +448,7 @@ def main() -> None:
     check("shell persisted", written.get("shell") == "auto")
     check("show_usage persisted", written.get("show_usage") is True)
     check("reasoning effort persisted", written.get("reasoning_effort") == "auto")
+    check("show_reasoning persisted", written.get("show_reasoning") is False)
     check("settings keep providers", "smoke" in (written.get("providers") or {}))
     check(
         "settings save mcp/env keys",
@@ -1395,6 +1400,27 @@ def main() -> None:
     )
     quiet(app.cmd_think, "auto")
     check("effort reset to auto", app.settings.reasoning_effort == "auto")
+
+    # -- clear wipes conversation state (and screen under a TTY) -----------
+    app.agent.messages = [{"role": "user", "content": "scratch"}]
+    app.agent.summary = "old summary"
+    app.agent.total_usage = {"prompt_tokens": 5, "completion_tokens": 5}
+    clear_out = quiet(app.cmd_clear, "")
+    check(
+        "clear resets conversation, summary and usage",
+        app.agent.messages == []
+        and app.agent.summary == ""
+        and app.agent.total_usage == {"prompt_tokens": 0, "completion_tokens": 0},
+    )
+    check(
+        "clear stays quiet without a TTY",
+        "conversation cleared" in clear_out and "\x1b[2J" not in clear_out,
+        clear_out,
+    )
+
+    quiet(app.cmd_settings, "show_reasoning on")
+    check("show_reasoning setting", app.settings.show_reasoning is True)
+    quiet(app.cmd_settings, "show_reasoning off")
 
     # -- command palette ----------------------------------------------------
     from agent.lineedit import LineEditor

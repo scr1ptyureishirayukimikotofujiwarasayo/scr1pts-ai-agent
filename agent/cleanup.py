@@ -53,6 +53,7 @@ CLEAN_CONFIG: dict[str, object] = {
     "auto_save": True,
     "show_tool_results": True,
     "show_usage": True,
+    "show_reasoning": False,
     "verbose": False,
     "mode": "build",
     "shell": "auto",

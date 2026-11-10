@@ -284,6 +284,7 @@ Unknown keys are preserved.
 | `auto_save` | bool | `true` | save the session on exit |
 | `show_tool_results` | bool | `true` | print one line per tool result |
 | `show_usage` | bool | `true` | print context/tokens/cost after every turn |
+| `show_reasoning` | bool | `false` | stream the model's reasoning text, dimmed |
 | `verbose` | bool | `false` | print latency + token usage |
 | `system_prompt` | string | `""` | custom system prompt; empty = built-in prompt |
 | `mode` | `"plan"` \| `"build"` | `"build"` | start in read-only planning mode or full build mode |
@@ -476,6 +477,10 @@ thinking effort -> high · applies to reasoning models · /settings save to pers
   parameter**, remembered per provider — so a wrong guess can't break the turn.
 - The banner shows `thinking: high` whenever it isn't `auto`, and context/token/
   cost lines reflect the larger replies automatically.
+- **Reasoning is streamed, not silent.** While the model reads/plans you see a
+  dim `…`; as soon as reasoning tokens arrive it becomes ` thinking…`. Set
+  `/settings show_reasoning on` to stream the reasoning text itself (dimmed,
+  separate line, terminal only).
 - Persist with `/settings save`; also available as `/settings reasoning_effort`
   and as a hand-edited `config.json` key. Aliases: `/reasoning`, `/effort`,
   `/thinking`.
@@ -576,6 +581,7 @@ and written back to `config.json` when you like the result.
 | `auto_save` | on/off | saving on exit |
 | `show_tool_results` | on/off | per-tool result lines in the terminal |
 | `show_usage` | on/off | post-turn context/token/cost line |
+| `show_reasoning` | on/off | stream reasoning text (terminal only) |
 | `verbose` | on/off | latency + token stats |
 | `workspace` | path | file/shell tools resolve here immediately |
 | `skills_dir` | path | rescans skills and rebuilds the registry |
@@ -641,6 +647,22 @@ with `show_usage` in `config.json`, `/settings show_usage off`, or
 
 Usage and cost are saved with sessions, so `/switch`-ing back restores the
 running totals; `/clear` and `/new` reset them.
+
+### Streaming output
+
+Replies stream token-by-token instead of appearing all at once:
+
+- a dim `…` is shown while waiting for the first token (erased as soon as text or
+  a tool call arrives, so it never litters the transcript),
+- reasoning models show ` thinking…` instead of sitting silent for half a minute,
+- tool calls print as `-> tool`, results as `<- tool` (suppress results with
+  `show_tool_results`),
+- the context/tokens/cost line follows the reply on its own line.
+
+`/clear` (alias `/cls`) now also wipes the visible screen and scrollback
+(`ESC[2J ESC[3J ESC[H`, TTY only) and reprints a compact header, so a cleared
+conversation doesn't leave old output above it. Piped/non-TTY output is never
+polluted with escape codes.
 
 ## Built-in tools
 
@@ -987,7 +1009,7 @@ commands keep working normally.
 | `/save [name]` | save now, optionally under a new name |
 | `/delete <n\|name>` | delete the JSON file (current conversation stays in memory) |
 | `/compact [turns\|show]` | fold older turns into a summary, keep recent ones verbatim |
-| `/clear` | forget the transcript and the compaction summary |
+| `/clear` | clear the conversation, summary and usage, and wipe the screen (`/cls`) |
 | `/model` | fetch the catalogue (validates the key) and open the ↑/↓ picker |
 | `/think [level]` | show/set thinking effort (`/reasoning`, `/effort`, `/thinking`) |
 | `/model list`, `/model <id>` | print the catalogue, or set a model directly (`/models` alias) |

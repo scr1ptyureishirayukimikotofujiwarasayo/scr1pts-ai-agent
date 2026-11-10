@@ -133,6 +133,7 @@ ALIASES = {
     "reasoning": "think",
     "effort": "think",
     "thinking": "think",
+    "cls": "clear",
     "cost": "usage",
     "tokens": "usage",
     "context": "usage",
@@ -325,17 +326,57 @@ class Application:
     # -- turns --------------------------------------------------------------
 
     def _callbacks(self) -> dict[str, Any]:
-        state = {"wrote": False}
+        tty = interactive()
+        state = {
+            "wrote": False,
+            "waiting": False,
+            "thinking": False,
+            "reasoning": False,
+        }
+
+        def erase() -> None:
+            if state["waiting"] and tty:
+                sys.stdout.write("\r\x1b[2K")
+                sys.stdout.flush()
+            state["waiting"] = False
+
+        def start() -> None:
+            state.update(wrote=False, waiting=False, thinking=False, reasoning=False)
+            if tty:
+                sys.stdout.write(dim("  …"))
+                sys.stdout.flush()
+                state["waiting"] = True
+
+        def on_reasoning(piece: str) -> None:
+            if not piece or not tty:
+                return
+            if self.settings.show_reasoning:
+                if state["waiting"]:
+                    erase()
+                state["reasoning"] = True
+                sys.stdout.write(dim(piece))
+                sys.stdout.flush()
+                return
+            if state["waiting"] and not state["thinking"]:
+                state["thinking"] = True
+                sys.stdout.write(dim(" thinking…"))
+                sys.stdout.flush()
 
         def on_delta(piece: str) -> None:
+            erase()
+            if state["reasoning"]:
+                sys.stdout.write("\n")
+                state["reasoning"] = False
             state["wrote"] = True
             sys.stdout.write(piece)
             sys.stdout.flush()
 
         def on_tool(name: str, arguments: dict[str, Any]) -> None:
-            if state["wrote"]:
+            erase()
+            if state["wrote"] or state["reasoning"]:
                 sys.stdout.write("\n")
                 state["wrote"] = False
+                state["reasoning"] = False
             detail = _summarise_arguments(arguments)
             print(cyan(f"  -> {name}") + (dim(f" {detail}") if detail else ""))
 
@@ -346,27 +387,43 @@ class Application:
             colour = red if is_error else green
             print(colour(f"  <- {name}: ") + dim(truncate(first, 160)))
 
-        return {"on_delta": on_delta, "on_tool": on_tool, "on_tool_result": on_tool_result, "state": state}
+        return {
+            "on_delta": on_delta,
+            "on_reasoning": on_reasoning,
+            "on_tool": on_tool,
+            "on_tool_result": on_tool_result,
+            "start": start,
+            "erase": erase,
+            "state": state,
+        }
 
     def run_once(self, prompt: str) -> int:
         callbacks = self._callbacks()
+        callbacks["start"]()
         started = time.monotonic()
         try:
             text = self.agent.run_turn(
                 prompt,
                 on_delta=callbacks["on_delta"],
+                on_reasoning=callbacks["on_reasoning"],
                 on_tool=callbacks["on_tool"],
                 on_tool_result=callbacks["on_tool_result"],
             )
         except LLMError as exc:
+            callbacks["erase"]()
             print(red(f"\nModel error: {exc}"), file=sys.stderr)
             return 1
         except KeyboardInterrupt:
+            callbacks["erase"]()
             print(yellow("\n[interrupted]"))
             return 130
         if not callbacks["state"]["wrote"]:
+            callbacks["erase"]()
+            if callbacks["state"]["reasoning"]:
+                sys.stdout.write("\n")
             print(text)
         else:
+            callbacks["erase"]()
             print()
         self._print_stats(started)
         self._print_usage()
@@ -443,24 +500,32 @@ class Application:
 
     def _turn(self, text: str) -> bool:
         callbacks = self._callbacks()
+        callbacks["start"]()
         started = time.monotonic()
         try:
             result = self.agent.run_turn(
                 text,
                 on_delta=callbacks["on_delta"],
+                on_reasoning=callbacks["on_reasoning"],
                 on_tool=callbacks["on_tool"],
                 on_tool_result=callbacks["on_tool_result"],
             )
         except LLMError as exc:
+            callbacks["erase"]()
             print(red(f"Model error: {exc}"))
             return False
         except KeyboardInterrupt:
+            callbacks["erase"]()
             print(yellow("\n[interrupted]"))
             self._repair_history()
             return False
         if not callbacks["state"]["wrote"]:
+            callbacks["erase"]()
+            if callbacks["state"]["reasoning"]:
+                sys.stdout.write("\n")
             print(result)
         else:
+            callbacks["erase"]()
             print()
         self._print_stats(started)
         self._print_usage()
@@ -669,7 +734,22 @@ class Application:
 
     def cmd_clear(self, _argument: str) -> None:
         self.agent.reset()
-        print(dim("conversation cleared"))
+        cleared_screen = False
+        if interactive():
+            sys.stdout.write("\x1b[2J\x1b[3J\x1b[H")
+            sys.stdout.flush()
+            cleared_screen = True
+            print(
+                bold(f"python ai agent {VERSION}")
+                + dim(f"  ·  {self.settings.provider.name}/{self.settings.model}")
+                + (
+                    dim(f"  ·  thinking: {self.settings.reasoning_effort}")
+                    if self.settings.reasoning_effort != "auto"
+                    else ""
+                )
+            )
+            print(dim(f"workspace: {self.settings.workspace}"))
+        print(dim("conversation cleared · screen reset" if cleared_screen else "conversation cleared"))
 
     # -- commands: model ----------------------------------------------------
 
@@ -1287,6 +1367,7 @@ class Application:
                 "auto_save": self.settings.auto_save,
                 "show_tool_results": self.settings.show_tool_results,
                 "show_usage": self.settings.show_usage,
+                "show_reasoning": self.settings.show_reasoning,
                 "verbose": self.settings.verbose,
                 "mode": self.settings.mode,
                 "shell": self.settings.shell,
