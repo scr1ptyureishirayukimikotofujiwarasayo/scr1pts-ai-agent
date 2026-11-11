@@ -292,6 +292,9 @@ Unknown keys are preserved.
 | `mode` | `"plan"` \| `"build"` | `"build"` | start in read-only planning mode or full build mode |
 | `shell` | `auto` \| `bash` \| `sh` \| `cmd` | `"auto"` | shell used by `run_command`; `auto` prefers bash |
 | `reasoning_effort` | `auto` \| `minimal` \| `low` \| `medium` \| `high` | `"auto"` | thinking effort for reasoning models |
+| `web_search_backend` | `auto` \| `duckduckgo` \| `searxng` | `"auto"` | search backend; `auto` uses SearXNG when a URL is set |
+| `searxng_url` | string | `""` | SearXNG base URL (falls back to `SEARXNG_URL`) |
+| `web_search_results` | int 1-10 | `5` | results returned by `web_search` |
 
 ### Paths
 
@@ -593,6 +596,9 @@ and written back to `config.json` when you like the result.
 | `mode` | plan/build | read-only, or restored full access |
 | `shell` | auto/bash/sh/cmd | how the next `run_command` is executed |
 | `reasoning_effort` | auto/minimal/low/medium/high | thinking effort for reasoning models |
+| `web_search_backend` | auto/duckduckgo/searxng | switch search backend live |
+| `searxng_url` | URL | point at a SearXNG instance |
+| `web_search_results` | 1-10 | default result count |
 | `env_file` | path | where `/keys` reads/writes API keys |
 | `mcp_config` | path | reconnect MCP servers from this file |
 | `mcp_enabled` | on/off | connect MCP servers at startup |
@@ -670,7 +676,8 @@ polluted with escape codes.
 
 `read_file`, `write_file`, `edit_file` (exact-snippet replace), `list_dir`,
 `search_files` (glob), `grep` (regex, `path:line: text`), `run_command`
-(shell, timeout, combined stdout/stderr), `http_request`, `todo_write`,
+(shell, timeout, combined stdout/stderr), `http_request`, `web_search`
+(SearXNG/DuckDuckGo), `web_fetch` (readable page text), `todo_write`,
 `run_python` (preferred execution path), `use_skill`, `read_agents_md`
 (project instructions for a subdirectory).
 Plugin tools (e.g. `now`) and MCP tools (`mcp__server__tool`) are added to the
@@ -681,6 +688,60 @@ same registry.
 `y/n/always` before running dangerous tools. `--yes` (or `/verbose`-style config change via
 `"confirm_shell": false`) auto-approves. File tools are rooted at `workspace`
 but absolute paths are still allowed — this is your machine, not a sandbox.
+
+## Web search
+
+Two read-only tools give the model access to the web without any API key:
+
+- **`web_search(query, max_results?, backend?)`** → titles, URLs and snippets.
+- **`web_fetch(url, max_chars?)`** → fetches a page and strips scripts/styles/
+  navigation into readable text (title + body), so the model can actually read a
+  result instead of parsing raw HTML.
+
+Backends:
+
+| backend | needs | notes |
+|---|---|---|
+| `searxng` | a running instance | preferred; JSON results, no third party tracking, self-hostable |
+| `duckduckgo` | nothing | HTML scraping fallback; may be rate-limited or bot-challenged |
+| `auto` (default) | — | SearXNG if `searxng_url`/`SEARXNG_URL` is set, else DuckDuckGo |
+
+```
+> /settings searxng_url http://localhost:8080
+> /settings web_search_backend auto
+> search the web for "python 3.13 asyncio changes"
+
+> /settings web_search_backend duckduckgo      # zero-config fallback
+```
+
+SearXNG quick start (Docker), then enable JSON in `settings.yml`:
+
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+```bash
+docker run -d --name searxng -p 8080:8080 searxng/searxng
+# config.json: "searxng_url": "http://localhost:8080"
+```
+
+- Configure via `config.json` (`web_search_backend`, `searxng_url`,
+  `web_search_results`), `/settings`, or the `SEARXNG_URL` env var.
+- `web_search` and `web_fetch` are marked read-only, so they work in **plan
+  mode**; they are the only network tools allowed there (besides GET/HEAD
+  `http_request`).
+- DuckDuckGo tries the full HTML endpoint first, then its Lite layout, both with
+  a browser User-Agent. It is free but can rate-limit or bot-challenge (HTTP
+  202); for regular use point `searxng_url` at your own instance.
+- Failures are actionable: a SearXNG 404 says "is JSON enabled?", a DuckDuckGo
+  bot check tells you to configure SearXNG.
+- Privacy: queries and URLs leave your machine to the chosen backend; `web_fetch`
+  can reach any URL (including localhost), like `http_request` — this is your
+  machine, not a sandbox. `DUCKDUCKGO_URL` overrides the HTML endpoint (useful
+  for mirrors/tests).
 
 ## Skills
 

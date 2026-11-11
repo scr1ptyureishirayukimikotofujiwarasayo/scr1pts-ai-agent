@@ -23,6 +23,14 @@ SETTINGS: tuple[Setting, ...] = (
     Setting("mode", "enum", "execution mode", choices=("plan", "build")),
     Setting("shell", "enum", "shell for run_command (auto prefers bash)", choices=("auto", "bash", "sh", "cmd")),
     Setting(
+        "web_search_backend",
+        "enum",
+        "web search backend (auto prefers SearXNG when configured)",
+        choices=("auto", "duckduckgo", "searxng"),
+    ),
+    Setting("searxng_url", "str", "SearXNG base URL (enables SearXNG backend)"),
+    Setting("web_search_results", "int", "results returned by web_search", 1, 10),
+    Setting(
         "reasoning_effort",
         "enum",
         "thinking effort for reasoning models",
@@ -98,6 +106,9 @@ DEFAULTS: dict[str, Any] = {
     "mode": "build",
     "shell": "auto",
     "reasoning_effort": "auto",
+    "web_search_backend": "auto",
+    "searxng_url": "",
+    "web_search_results": 5,
     "mcp_enabled": True,
     "mcp_timeout": 30,
 }

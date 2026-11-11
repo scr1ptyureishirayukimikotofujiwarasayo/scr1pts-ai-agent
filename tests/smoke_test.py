@@ -119,6 +119,64 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         STATE["last_ua"] = self.headers.get("user-agent") or ""
+        if self.path.startswith("/searxng/search"):
+            payload = {
+                "results": [
+                    {
+                        "title": "Result One",
+                        "url": "https://example.com/one",
+                        "content": "First snippet from SearXNG.",
+                    },
+                    {
+                        "title": "Result Two",
+                        "url": "https://example.com/two",
+                        "content": "Second snippet.",
+                    },
+                ]
+            }
+            self._send(json.dumps(payload).encode(), "application/json")
+            return
+        if self.path.startswith("/ddg?"):
+            markup = (
+                '<html><body>'
+                '<div class="result">'
+                '<a rel="nofollow" class="result__a" '
+                'href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Falpha&amp;rut=x">'
+                'Alpha <b>Result</b></a>'
+                '<a class="result__snippet">Alpha snippet text.</a>'
+                '</div>'
+                '<div class="result">'
+                '<a rel="nofollow" class="result__a" href="https://example.org/beta">'
+                'Beta Result</a>'
+                '<div class="result__snippet">Beta snippet text.</div>'
+                '</div>'
+                '</body></html>'
+            )
+            self._send(markup.encode(), "text/html; charset=utf-8")
+            return
+        if self.path.startswith("/ddg-lite"):
+            markup = (
+                '<html><body><table>'
+                '<tr><td><a rel="nofollow" class="result-link" '
+                'href="https://lite.example/one">Lite Result One</a></td></tr>'
+                '<tr><td class="result-snippet">Lite snippet one.</td></tr>'
+                '<tr><td><a rel="nofollow" class="result-link" '
+                'href="//duckduckgo.com/l/?uddg=https%3A%2F%2Flite.example%2Ftwo">'
+                'Lite Result Two</a></td></tr>'
+                '<tr><td class="result-snippet">Lite snippet two.</td></tr>'
+                '</table></body></html>'
+            )
+            self._send(markup.encode(), "text/html; charset=utf-8")
+            return
+        if self.path == "/page":
+            markup = (
+                '<!doctype html><html><head><title>Doc Title</title>'
+                '<script>alert("bad")</script><style>.x{color:red}</style></head>'
+                '<body><h1>Hello</h1><p>World &amp; friends</p>'
+                '<p>Second paragraph.</p></body></html>'
+            )
+            self._send(markup.encode(), "text/html; charset=utf-8")
+            return
         if self.path.rstrip("/").endswith("/forbidden/models"):
             body = json.dumps({"error": {"message": "cloudflare"}}).encode()
             self.send_response(403)
@@ -545,6 +603,7 @@ def main() -> None:
     check("shell persisted", written.get("shell") == "auto")
     check("show_usage persisted", written.get("show_usage") is True)
     check("reasoning effort persisted", written.get("reasoning_effort") == "auto")
+    check("web search settings persisted", written.get("web_search_backend") == "auto" and written.get("searxng_url") == "")
     check("show_reasoning persisted", written.get("show_reasoning") is False)
     check("settings keep providers", "smoke" in (written.get("providers") or {}))
     check(
@@ -817,6 +876,7 @@ def main() -> None:
         app.agent._mode_block("run_python", {}) != ""
         and app.agent._mode_block("write_file", {}) != ""
         and app.agent._mode_block("read_file", {}) == ""
+        and app.agent._mode_block("web_search", {}) == ""
         and app.agent._mode_block("mcp__fake__add", {}) != ""
         and app.agent._mode_block("mcp__fake__echo", {}) == "",
     )
@@ -921,6 +981,78 @@ def main() -> None:
     quiet(app.cmd_settings, "shell bogus")
     check("invalid shell rejected by settings", app.settings.shell == "bash")
     quiet(app.cmd_settings, "shell auto")
+
+    # -- web search + readable fetch ---------------------------------------
+    base = f"http://127.0.0.1:{port}"
+    quiet(app.cmd_settings, f"searxng_url {base}/searxng")
+    check("searxng setting applies", app.settings.searxng_url.endswith("/searxng"))
+    app.settings.web_search_backend = "auto"
+
+    search_result, search_error = app.registry.call("web_search", {"query": "python asyncio"})
+    check(
+        "searxng search",
+        not search_error
+        and "Result One" in search_result
+        and "https://example.com/one" in search_result,
+        search_result,
+    )
+
+    app.settings.web_search_backend = "duckduckgo"
+    os.environ["DUCKDUCKGO_URL"] = base + "/ddg"
+    try:
+        ddg_result, ddg_error = app.registry.call("web_search", {"query": "python"})
+    finally:
+        os.environ.pop("DUCKDUCKGO_URL", None)
+    check(
+        "duckduckgo search",
+        not ddg_error
+        and "Alpha Result" in ddg_result
+        and "https://example.com/alpha" in ddg_result
+        and "Beta Result" in ddg_result,
+        ddg_result,
+    )
+
+    os.environ["DUCKDUCKGO_URL"] = base + "/ddg-lite"
+    try:
+        lite_result, lite_error = app.registry.call("web_search", {"query": "lite"})
+    finally:
+        os.environ.pop("DUCKDUCKGO_URL", None)
+    check(
+        "duckduckgo lite layout parses",
+        not lite_error
+        and "Lite Result One" in lite_result
+        and "https://lite.example/two" in lite_result,
+        lite_result,
+    )
+
+    app.settings.web_search_backend = "auto"
+    fetched, fetch_error = app.registry.call("web_fetch", {"url": base + "/page"})
+    check(
+        "web_fetch returns readable text",
+        not fetch_error
+        and "Doc Title" in fetched
+        and "Hello" in fetched
+        and "World & friends" in fetched
+        and "alert(" not in fetched
+        and "color:red" not in fetched,
+        fetched,
+    )
+    check(
+        "web tools are read-only",
+        bool(app.registry.get("web_search").read_only)
+        and bool(app.registry.get("web_fetch").read_only),
+    )
+
+    app.settings.web_search_backend = "searxng"
+    app.settings.searxng_url = base + "/missing"
+    missing_result, _ = app.registry.call("web_search", {"query": "x"})
+    check(
+        "searxng errors are actionable",
+        "SearXNG" in missing_result and ("HTTP 404" in missing_result or "json" in missing_result),
+        missing_result,
+    )
+    app.settings.searxng_url = ""
+    app.settings.web_search_backend = "auto"
 
     # -- provider catalogue -------------------------------------------------
     from agent.config import DEFAULT_PROVIDERS, build_provider

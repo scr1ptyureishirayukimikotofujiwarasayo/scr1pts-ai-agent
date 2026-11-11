@@ -239,6 +239,9 @@ class Settings:
     mode: str = "build"  # "plan" (read-only) or "build"
     shell: str = "auto"  # auto | bash | sh | cmd (run_command only)
     reasoning_effort: str = "auto"  # auto | minimal | low | medium | high
+    web_search_backend: str = "auto"  # auto | duckduckgo | searxng
+    searxng_url: str = ""
+    web_search_results: int = 5
     env_file: Path = ROOT / ".env"
     mcp_config: Path = ROOT / "mcp.json"
     mcp_enabled: bool = True
@@ -389,6 +392,9 @@ def load_settings(
         mode=str(file_cfg.get("mode", "build")).strip().lower(),
         shell=str(file_cfg.get("shell", "auto")).strip().lower(),
         reasoning_effort=str(file_cfg.get("reasoning_effort", "auto")).strip().lower(),
+        web_search_backend=str(file_cfg.get("web_search_backend", "auto")).strip().lower(),
+        searxng_url=str(file_cfg.get("searxng_url", "") or "").strip(),
+        web_search_results=int(file_cfg.get("web_search_results", 5)),
         env_file=env_file,
         mcp_config=path("mcp_config", ROOT / "mcp.json"),
         mcp_enabled=bool(file_cfg.get("mcp_enabled", True)),
@@ -407,6 +413,12 @@ def load_settings(
             "reasoning_effort must be one of auto, minimal, low, medium, high, "
             f"got {settings.reasoning_effort!r}"
         )
+    if settings.web_search_backend not in ("auto", "duckduckgo", "searxng"):
+        raise ConfigError(
+            "web_search_backend must be auto, duckduckgo or searxng, "
+            f"got {settings.web_search_backend!r}"
+        )
+    settings.web_search_results = max(1, min(10, int(settings.web_search_results)))
     for key, value in overrides.items():
         if value is not None and hasattr(settings, key):
             setattr(settings, key, value)

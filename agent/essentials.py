@@ -17,6 +17,8 @@ from .agentsmd import discover, format_text
 from .config import Settings
 from .shells import ShellError, resolve as resolve_shell
 from .util import VERSION
+from .websearch import web_fetch as fetch_page_text
+from .websearch import web_search as search_web
 from .tools import Registry
 from .util import truncate
 
@@ -372,6 +374,53 @@ def register_essentials(
         return truncate(f"[exit {completed.returncode}]\n{output or '(no output)'}", MAX_OUTPUT)
 
     # -- network ------------------------------------------------------------
+
+    @registry.register(
+        "web_search",
+        "Search the web and return titles, URLs and snippets. Uses SearXNG when configured, otherwise DuckDuckGo. No API key required.",
+        {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Search query"},
+                "max_results": {
+                    "type": "integer",
+                    "description": "Results to return (1-10; default from settings)",
+                },
+                "backend": {
+                    "type": "string",
+                    "enum": ["auto", "duckduckgo", "searxng"],
+                    "description": "Override the configured backend for this call",
+                },
+            },
+            "required": ["query"],
+        },
+        read_only=True,
+    )
+    def web_search(
+        query: str, max_results: int | None = None, backend: str | None = None
+    ) -> str:
+        return search_web(query, settings, max_results=max_results, backend=backend)
+
+    @registry.register(
+        "web_fetch",
+        "Fetch a web page and return its readable text (scripts/styles stripped). Use after web_search to read a result.",
+        {
+            "type": "object",
+            "properties": {
+                "url": {"type": "string", "description": "http(s) URL to fetch"},
+                "max_chars": {
+                    "type": "integer",
+                    "description": "Maximum characters of text to return",
+                    "default": 8000,
+                },
+                "timeout": {"type": "integer", "default": 20},
+            },
+            "required": ["url"],
+        },
+        read_only=True,
+    )
+    def web_fetch(url: str, max_chars: int = 8000, timeout: int = 20) -> str:
+        return fetch_page_text(url, max_chars=max_chars, timeout=timeout)
 
     @registry.register(
         "http_request",
